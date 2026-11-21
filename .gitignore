@@ -1,0 +1,16 @@
+# Wi-Fi credentials (local only)
+secrets.h
+
+# Arduino / RP2040 build artifacts
+*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+*.eep
+build/
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+.vscode/
