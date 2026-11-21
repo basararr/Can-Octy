@@ -6,9 +6,13 @@ Skoda Octavia MY13 (VAG MQB, EA288 1.6 TDI CLHA) aracına MCP2515 ile CAN-Bus ü
 
 `vag_pico_custom_query` içindeki web arayüzünün örnek EA288 1.6 TDI verileriyle görünümü:
 
-| Dashboard | Özel Sorgu (Raw Hex) |
-| :---: | :---: |
-| <img src="docs/ui-dashboard.png" width="260" alt="Dashboard"> | <img src="docs/ui-custom-query.png" width="260" alt="Özel Sorgu"> |
+| Dashboard | Menü | Ekranı Özelleştir |
+| :---: | :---: | :---: |
+| <img src="docs/ui-dashboard.png" width="210" alt="Dashboard"> | <img src="docs/ui-menu.png" width="210" alt="Menü"> | <img src="docs/ui-settings.png" width="210" alt="Ekranı Özelleştir"> |
+
+| Özel Sorgu (Raw Hex) | Modül & Gateway Tarayıcı | DID Doğrulayıcı |
+| :---: | :---: | :---: |
+| <img src="docs/ui-custom-query.png" width="210" alt="Özel Sorgu"> | <img src="docs/ui-scanner.png" width="210" alt="Modül & Gateway Tarayıcı"> | <img src="docs/ui-validator.png" width="210" alt="DID Doğrulayıcı"> |
 
 ## Klasörler ve İçerikleri
 
