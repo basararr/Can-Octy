@@ -1,0 +1,1575 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Can-Octy • VAG CAN MFD Canlı Simülatör</title>
+    <style>
+        :root {
+            --bg: #000;
+            --surface: #0a0a0a;
+            --card: #111;
+            --border: #222;
+            --border-strong: #333;
+            --accent: #fff;
+            --text: #fff;
+            --muted: #888;
+            --ok: #4ade80;
+            --warn: #fbbf24;
+            --err: #f87171;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 16px;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.45;
+        }
+        .topbar {
+            max-width: 1120px;
+            margin: 0 auto 18px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .topbar > * { min-width: 0; max-width: 100%; }
+        .brand h1 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: -0.3px;
+        }
+        .brand p {
+            margin: 3px 0 0;
+            font-size: 13px;
+            color: var(--muted);
+        }
+        .repo-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--card);
+            color: var(--text);
+            border: 1px solid var(--border-strong);
+            padding: 8px 14px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 600;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .repo-link:hover {
+            background: #1b1b1b;
+            border-color: #555;
+        }
+
+        .studio {
+            max-width: 1120px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+            gap: 22px;
+            align-items: start;
+        }
+        .studio > * { min-width: 0; }
+        @media (max-width: 860px) {
+            body { padding: 10px; }
+            .studio {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 16px;
+            }
+        }
+        @media (max-width: 480px) {
+            .boost-val { font-size: 42px; }
+            .slot { padding: 11px; min-height: 74px; }
+            .slot-val { font-size: 20px; }
+            .device-frame { padding: 10px; border-radius: 18px; }
+            .badge { padding: 3px 8px; font-size: 11px; }
+            .edit-btn { padding: 5px 10px; font-size: 12px; }
+        }
+        .grid > * { min-width: 0; }
+
+        /* LEFT COLUMN: REALISTIC PICO WEB UI FRAME */
+        .device-frame {
+            background: #000;
+            border: 1px solid #2b2b2b;
+            border-radius: 24px;
+            padding: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75);
+            user-select: none;
+            min-width: 0;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            color: var(--muted);
+            margin-bottom: 10px;
+            position: relative;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .badge {
+            background: #161616;
+            border: 1px solid #2b2b2b;
+            color: #aaa;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        .badge.ok { color: var(--ok); border-color: #1f4d2e; }
+        .badge.warn { color: var(--warn); border-color: #4d3b14; }
+        .badge.err { color: var(--err); border-color: #5c1f1f; }
+        .edit-btn {
+            background: #2a2a2a;
+            color: #fff;
+            border: 1px solid #3a3a3a;
+            padding: 5px 13px;
+            border-radius: 14px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .edit-btn:hover { background: #363636; }
+        .edit-btn:active { background: #444; }
+        #nav_menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 36px;
+            background: #1a1a1a;
+            padding: 4px;
+            border-radius: 12px;
+            z-index: 200;
+            border: 1px solid #333;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.85);
+            width: 195px;
+        }
+        .nav-item {
+            padding: 12px;
+            font-size: 14px;
+            color: #fff;
+            border-bottom: 1px solid #2a2a2a;
+            cursor: pointer;
+            text-align: center;
+        }
+        .nav-item:last-child { border-bottom: none; }
+        .nav-item:hover { background: #262626; border-radius: 8px; }
+        .nav-item:active { background: #333; border-radius: 8px; }
+
+        .boost-container {
+            background: var(--card);
+            border-radius: 15px;
+            padding: 18px 20px;
+            text-align: center;
+            margin-bottom: 12px;
+            border: 1px solid var(--border);
+        }
+        .boost-lbl {
+            font-size: 13px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .boost-val {
+            font-size: 52px;
+            font-weight: 800;
+            line-height: 1.05;
+            margin: 6px 0 4px;
+            font-variant-numeric: tabular-nums;
+        }
+        .bar-bg {
+            position: relative;
+            background: #222;
+            height: 14px;
+            border-radius: 7px;
+            margin-top: 12px;
+            overflow: hidden;
+        }
+        .bar-zero {
+            position: absolute;
+            left: 23%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #666;
+            z-index: 2;
+        }
+        .bar-fill-boost {
+            position: absolute;
+            left: 23%;
+            top: 0;
+            bottom: 0;
+            width: 77%;
+            background: var(--accent);
+            transform-origin: left center;
+            transform: scaleX(0);
+            will-change: transform;
+        }
+        .bar-fill-vac {
+            position: absolute;
+            right: 77%;
+            top: 0;
+            bottom: 0;
+            width: 23%;
+            background: var(--accent);
+            transform-origin: right center;
+            transform: scaleX(0);
+            will-change: transform;
+        }
+        .bar-scale {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #555;
+            margin-top: 5px;
+            font-variant-numeric: tabular-nums;
+        }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .slot {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 13px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            border: 1px solid var(--border);
+            min-height: 80px;
+        }
+        .slot-lbl { font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+        .slot-val { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .dpf-mini-bg {
+            background: #2a2a2a;
+            height: 8px;
+            border-radius: 4px;
+            width: 100%;
+            margin-top: 7px;
+            overflow: hidden;
+        }
+        .dpf-mini-fill {
+            background: #fff;
+            height: 100%;
+            width: 0%;
+            transition: width 0.25s;
+        }
+
+        .view { display: none; }
+        .view.active { display: block; }
+        .card-box {
+            background: var(--card);
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+        }
+        .slot-select { margin-bottom: 12px; }
+        .slot-select label {
+            display: block;
+            margin-bottom: 5px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+        select, input[type="text"] {
+            width: 100%;
+            min-width: 0;
+            max-width: 100%;
+            padding: 10px;
+            background: #1d1d1d;
+            color: #fff;
+            border: 1px solid #383838;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        select:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #666;
+        }
+        .term {
+            background: #0c0c0c;
+            padding: 12px;
+            border-radius: 10px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            color: var(--ok);
+            height: 350px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            border: 1px solid #2b2b2b;
+            word-break: break-word;
+            user-select: text;
+        }
+        .action-btn {
+            background: #222;
+            color: #fff;
+            border: 1px solid #3c3c3c;
+            padding: 11px 13px;
+            border-radius: 10px;
+            width: 100%;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+        .action-btn:hover { background: #2c2c2c; }
+        .action-btn:active { background: #3a3a3a; }
+        .btn-row { display: flex; gap: 8px; margin-bottom: 10px; }
+        .btn-row .action-btn { margin-bottom: 0; }
+        .btn-secondary { flex: 0 0 96px; background: #161616; color: #aaa; }
+        .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+        .preset-btn {
+            background: #1d1d1d;
+            color: #ddd;
+            border: 1px solid #333;
+            padding: 5px 9px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .preset-btn:hover { background: #2a2a2a; border-color: #4a4a4a; }
+        .hint {
+            font-size: 12px;
+            color: var(--ok);
+            margin-top: 5px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 6px;
+        }
+        .chip {
+            background: #151515;
+            color: #bbb;
+            border: 1px solid #2a2a2a;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            cursor: pointer;
+        }
+        .chip:hover { color: #fff; border-color: #4a4a4a; }
+
+        /* MODAL */
+        #modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.88);
+            z-index: 300;
+            padding: 18px;
+            overflow-y: auto;
+        }
+        .modal-content {
+            max-width: 430px;
+            margin: 12px auto 30px;
+            background: var(--card);
+            padding: 18px;
+            border-radius: 14px;
+            border: 1px solid var(--border-strong);
+        }
+        .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 14px; text-align: center; }
+        .save-btn {
+            background: #fff;
+            color: #000;
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 700;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+        .save-btn:hover { background: #e8e8e8; }
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .modal-actions .action-btn { margin-bottom: 0; font-size: 13px; padding: 10px; }
+
+        /* RIGHT COLUMN: STUDIO PANELS */
+        .panels {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            min-width: 0;
+        }
+        .panel-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 16px 18px;
+            min-width: 0;
+        }
+        .panel-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .panel-title {
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: -0.2px;
+        }
+        .panel-sub {
+            font-size: 12px;
+            color: var(--muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        .scenario-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        @media (max-width: 520px) {
+            .scenario-grid { grid-template-columns: 1fr; }
+        }
+        .sc-btn {
+            background: #171717;
+            color: #ddd;
+            border: 1px solid #2b2b2b;
+            border-radius: 11px;
+            padding: 10px 12px;
+            text-align: left;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .sc-btn:hover { background: #1e1e1e; border-color: #444; }
+        .sc-btn.active {
+            background: #fff;
+            color: #000;
+            border-color: #fff;
+        }
+        .sc-btn strong { display: block; font-size: 13px; }
+        .sc-btn span {
+            display: block;
+            font-size: 11px;
+            opacity: 0.72;
+            margin-top: 2px;
+        }
+
+        .throttle-box {
+            background: #0c0c0c;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .throttle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+        .mini-btn {
+            background: #1f1f1f;
+            color: #ddd;
+            border: 1px solid #353535;
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .mini-btn:hover { background: #2c2c2c; color: #fff; }
+        .mini-btn.wake {
+            background: #14361f;
+            border-color: #25683a;
+            color: var(--ok);
+            font-weight: 600;
+        }
+        .mini-btn.wake:hover { background: #1a4729; }
+        input[type="range"] {
+            width: 100%;
+            accent-color: #fff;
+            cursor: pointer;
+        }
+        .scenario-note {
+            font-size: 12px;
+            color: #bbb;
+            background: #161616;
+            border-left: 3px solid #fff;
+            padding: 8px 10px;
+            border-radius: 6px;
+        }
+
+        .can-log {
+            background: #080808;
+            border: 1px solid #242424;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.55;
+            min-height: 138px;
+            max-height: 170px;
+            overflow: auto;
+            max-width: 100%;
+        }
+        .frame-line { white-space: pre; }
+        .frame-tx { color: #fbbf24; }
+        .frame-rx { color: #4ade80; }
+        .frame-sleep { color: #9ca3af; }
+        .frame-err { color: #f87171; }
+
+        .decoder-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .decoder-row > * { min-width: 0; }
+        @media (max-width: 560px) {
+            .decoder-row { grid-template-columns: minmax(0, 1fr); }
+        }
+        .hex-input-group {
+            display: flex;
+            gap: 6px;
+            min-width: 0;
+        }
+        .hex-input-group input {
+            flex: 1;
+            min-width: 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            text-transform: uppercase;
+        }
+        .hex-input-group .mini-btn { white-space: nowrap; flex-shrink: 0; }
+        .decode-result {
+            background: #0c0c0c;
+            border: 1px solid #262626;
+            border-radius: 10px;
+            padding: 12px;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px 14px;
+            font-size: 12px;
+        }
+        .decode-result > * { min-width: 0; overflow-wrap: anywhere; }
+        @media (max-width: 560px) {
+            .decode-result { grid-template-columns: minmax(0, 1fr); }
+        }
+        .dec-k { color: var(--muted); display: block; margin-bottom: 2px; }
+        .dec-v {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .dec-v.big { font-size: 18px; color: var(--ok); }
+        .dec-v.bad { color: var(--err); font-weight: 600; }
+    </style>
+</head>
+<body>
+
+<header class="topbar">
+    <div class="brand">
+        <h1>Can-Octy • VAG CAN MFD Simülatörü</h1>
+        <p>Skoda Octavia MY13 (MQB • EA288 1.6 TDI CLHA) • Raspberry Pi Pico 2 W + MCP2515 Web Arayüzü</p>
+    </div>
+    <a class="repo-link" href="https://github.com/basararr/Can-Octy" target="_blank" rel="noopener">GitHub Repo ↗</a>
+</header>
+
+<main class="studio">
+    <!-- LEFT: REALISTIC DEVICE UI -->
+    <section class="device-frame" aria-label="Can-Octy Web Arayüzü Önizleme">
+        <div class="header">
+            <div class="badges">
+                <span id="status" class="badge ok">DEMO</span>
+                <span id="can_status" class="badge ok">CAN: AKTİF</span>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button id="btn_edit" class="edit-btn" onclick="openSettings()">Düzenle</button>
+                <button id="btn_menu" class="edit-btn" onclick="toggleMenu(event)">☰ Menü</button>
+            </div>
+            <div id="nav_menu">
+                <div class="nav-item" onclick="switchTab('mfd')">Dashboard</div>
+                <div class="nav-item" onclick="switchTab('custom')">Özel Sorgu (Raw Hex)</div>
+                <div class="nav-item" onclick="switchTab('scanner')">Modül & Gateway Tarayıcı</div>
+                <div class="nav-item" onclick="switchTab('validator')">DID Doğrulayıcı (24 DID)</div>
+            </div>
+        </div>
+
+        <!-- VIEW 1: DASHBOARD -->
+        <div id="view_mfd" class="view active">
+            <div class="boost-container">
+                <div class="boost-lbl">Turbo Basıncı</div>
+                <div class="boost-val" id="val_boost">+0.00 BAR</div>
+                <div class="bar-bg">
+                    <div class="bar-zero"></div>
+                    <div class="bar-fill-vac" id="bar_vac"></div>
+                    <div class="bar-fill-boost" id="bar_boost"></div>
+                </div>
+                <div class="bar-scale"><span>-0.6</span><span>0.0</span><span>+1.0</span><span>+2.0 BAR</span></div>
+            </div>
+            <div class="grid" id="main_grid"></div>
+        </div>
+
+        <!-- VIEW 2: CUSTOM QUERY -->
+        <div id="view_custom" class="view">
+            <div class="card-box">
+                <div class="presets">
+                    <button class="preset-btn" onclick="setMod('7E0')">ECU 7E0</button>
+                    <button class="preset-btn" onclick="setMod('7E1')">TCU 7E1</button>
+                    <button class="preset-btn" onclick="setMod('710')">Gateway 710</button>
+                    <button class="preset-btn" onclick="setMod('714')">Kombi 714</button>
+                    <button class="preset-btn" onclick="setMod('70E')">BCM 70E</button>
+                    <button class="preset-btn" onclick="setMod('713')">ABS 713</button>
+                    <button class="preset-btn" onclick="setMod('74A')">Kapı 74A</button>
+                </div>
+                <div class="slot-select">
+                    <label>Modül TX Adresi (Hex, Örn: 7E0 veya 710)</label>
+                    <input type="text" id="inp_mod" value="7E0" oninput="updateRxHint()" style="text-transform:uppercase;">
+                    <div class="hint" id="rx_hint">Beklenen Yanıt (RX): 0x7E8 (Otomatik)</div>
+                </div>
+                <div class="slot-select">
+                    <label>Opsiyonel Manuel RX ID (Boş = Otomatik VAG Kuralı)</label>
+                    <input type="text" id="inp_rx" placeholder="Otomatik (ör: 7E8 veya 77A)" oninput="updateRxHint()" style="text-transform:uppercase;">
+                </div>
+                <div class="slot-select">
+                    <label>DID (Veri Kodu - Hex, Örn: 181A, F187, 04A0)</label>
+                    <input type="text" id="inp_did" value="181A" style="text-transform:uppercase;">
+                    <div class="chip-row">
+                        <button class="chip" onclick="quickDid('7E0','181A')">7E0/181A Turbo</button>
+                        <button class="chip" onclick="quickDid('7E0','114F')">7E0/114F Soot</button>
+                        <button class="chip" onclick="quickDid('7E0','F187')">7E0/F187 PN</button>
+                        <button class="chip" onclick="quickDid('710','04A0')">710/04A0 GW</button>
+                        <button class="chip" onclick="quickDid('7E0','F190')">7E0/F190 VIN</button>
+                        <button class="chip" onclick="quickDid('7E0','9999')">7E0/9999 NRC</button>
+                    </div>
+                </div>
+                <div class="btn-row">
+                    <button class="action-btn" onclick="sendCustom()">Sorgula</button>
+                    <button class="action-btn btn-secondary" onclick="clearTerm('term_custom')">Temizle</button>
+                </div>
+                <div class="term" id="term_custom" style="height:260px;">Hazır. Bir modül ve DID seçip 'Sorgula'ya bas...</div>
+            </div>
+        </div>
+
+        <!-- VIEW 3: SCANNER -->
+        <div id="view_scanner" class="view">
+            <div class="btn-row">
+                <button class="action-btn" onclick="runSimulatedScan()">Gateway & Modülleri Tara</button>
+                <button class="action-btn btn-secondary" onclick="clearTerm('term_scan')">Temizle</button>
+            </div>
+            <div class="term" id="term_scan">Loglar bekleniyor... Taramayı başlatmak için üstteki butona bas.</div>
+        </div>
+
+        <!-- VIEW 4: VALIDATOR -->
+        <div id="view_validator" class="view">
+            <div class="btn-row">
+                <button class="action-btn" onclick="runSimulatedValidation()">24 DID'i Doğrula (0x7E0)</button>
+                <button class="action-btn btn-secondary" onclick="clearTerm('term_val')">Temizle</button>
+            </div>
+            <div class="term" id="term_val">Loglar bekleniyor... Doğrulamayı başlatmak için üstteki butona bas.</div>
+        </div>
+    </section>
+
+    <!-- RIGHT: CONTROLS, CAN STREAM, 24 DID HEX DECODER -->
+    <section class="panels">
+        <!-- CARD 1: SCENARIO & THROTTLE -->
+        <div class="panel-card">
+            <div class="panel-head">
+                <div class="panel-title">1. Sürüş Senaryosu & Gaz Kontrolü</div>
+                <div class="panel-sub" id="sim_clock">BUS_ACTIVE • 500 kbps</div>
+            </div>
+            <div class="scenario-grid">
+                <button class="sc-btn active" id="sc_idle" onclick="setScenario('idle')">
+                    <strong>Rölanti (Idle)</strong>
+                    <span>~0.0 BAR, sıcak motor (90°C)</span>
+                </button>
+                <button class="sc-btn" id="sc_pull" onclick="setScenario('pull')">
+                    <strong>Gazlama (Pull)</strong>
+                    <span>+1.55 BAR turbo, lift-off vakumu</span>
+                </button>
+                <button class="sc-btn" id="sc_regen" onclick="setScenario('regen')">
+                    <strong>DPF Regen (Aktif)</strong>
+                    <span>EGT 625°C+, Post Enj aktif, kurum düşüyor</span>
+                </button>
+                <button class="sc-btn" id="sc_sleep" onclick="setScenario('sleep')">
+                    <strong>Kontak Kapalı (Uyku)</strong>
+                    <span>3 sn bekleme → Listen-Only uyku</span>
+                </button>
+            </div>
+
+            <div class="throttle-box">
+                <div class="throttle-row">
+                    <span>Gaz Pedalı / Yük: <strong id="thr_label">Otomatik Senaryo</strong></span>
+                    <div style="display:flex; gap:6px;">
+                        <button class="mini-btn wake" id="btn_wake" style="display:none;" onclick="setScenario('idle')">Kapı Aç / CAN Uyandır</button>
+                        <button class="mini-btn" id="btn_auto_thr" style="display:none;" onclick="releaseManualThrottle()">Senaryoya Dön</button>
+                    </div>
+                </div>
+                <input type="range" id="thr_slider" min="0" max="100" value="12" oninput="onThrottleInput(this.value)">
+            </div>
+            <div class="scenario-note" id="scenario_note"></div>
+        </div>
+
+        <!-- CARD 2: LIVE CAN-BUS FRAME STREAM -->
+        <div class="panel-card">
+            <div class="panel-head">
+                <div class="panel-title">2. Canlı CAN-Bus / UDS Frame Akışı</div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="panel-sub">MCP2515 (8 MHz)</span>
+                    <button class="mini-btn" id="btn_pause_can" onclick="toggleCanPause()">Durdur</button>
+                </div>
+            </div>
+            <div class="can-log" id="can_log"></div>
+        </div>
+
+        <!-- CARD 3: 24 DID RAW HEX DECODER -->
+        <div class="panel-card">
+            <div class="panel-head">
+                <div class="panel-title">3. 24 DID Ham Hex Çözücü</div>
+                <div class="panel-sub">EA288 UDS 0x22 Formül Hesaplayıcı</div>
+            </div>
+            <div class="decoder-row">
+                <div>
+                    <label for="dec_did" style="display:block;font-size:12px;color:var(--muted);margin-bottom:5px;">DID Seç (24 Adet Doğrulanmış)</label>
+                    <select id="dec_did" onchange="onDecoderDidChange()"></select>
+                </div>
+                <div>
+                    <label for="dec_hex" style="display:block;font-size:12px;color:var(--muted);margin-bottom:5px;">Ham Veri Baytları (Big-Endian Hex)</label>
+                    <div class="hex-input-group">
+                        <input type="text" id="dec_hex" value="1F 40" oninput="renderHexDecode()">
+                        <button class="mini-btn" onclick="grabLiveHex()">Canlı Çek</button>
+                    </div>
+                </div>
+            </div>
+            <div class="decode-result" id="decode_result"></div>
+        </div>
+    </section>
+</main>
+
+<!-- SETTINGS MODAL -->
+<div id="modal" onclick="onModalBackdrop(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="modal-title">Ekranı Özelleştir</div>
+        <div id="modal_slots"></div>
+        <button class="save-btn" onclick="saveSettings()">Kaydet ve Çık</button>
+        <div class="modal-actions">
+            <button class="action-btn btn-secondary" style="flex:1;" onclick="resetDefaultLayout()">Varsayılana Dön</button>
+            <button class="action-btn" style="flex:1;" onclick="closeSettings()">İptal</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// Exact 24 EA288 DIDs + Formulas verified in vag_pico_custom_query.ino
+const DID_LIST = [
+    { key: "F405", name: "Soğutma Suyu",    unit: "°C",  len: 1, fmtType: "u8_m40",          formula: "raw - 40",                      fmt: v => v.toFixed(0) },
+    { key: "11BE", name: "Motor Yağı",      unit: "°C",  len: 2, fmtType: "u16_div10_m2731", formula: "(raw / 10) - 273.1",            fmt: v => v.toFixed(0) },
+    { key: "181A", name: "Turbo Basıncı",   unit: "BAR", len: 2, fmtType: "boost_rel",       formula: "((raw * 0.25) - 1000) / 1000",  fmt: v => (v > 0.005 ? "+" : "") + v.toFixed(2) },
+    { key: "105E", name: "Akü Voltajı",     unit: "V",   len: 2, fmtType: "u16_div50",       formula: "raw / 50",                      fmt: v => v.toFixed(1) },
+    { key: "100C", name: "Yakıt",           unit: "L",   len: 2, fmtType: "u16_div100",      formula: "raw / 100",                     fmt: v => v.toFixed(1) },
+    { key: "114F", name: "Soot Calc",       unit: "g",   len: 2, fmtType: "u16_div100",      formula: "raw / 100",                     fmt: v => v.toFixed(2) },
+    { key: "114E", name: "Soot Meas",       unit: "g",   len: 2, fmtType: "s16_div100",      formula: "int16(raw) / 100",              fmt: v => v.toFixed(2) },
+    { key: "14F5", name: "DPF dP",          unit: "hPa", len: 2, fmtType: "s16_div10",       formula: "int16(raw) / 10",               fmt: v => v.toFixed(1) },
+    { key: "178C", name: "Oil Ash",         unit: "g",   len: 2, fmtType: "u16_div10",       formula: "raw / 10",                      fmt: v => v.toFixed(1) },
+    { key: "1156", name: "Mesafe / Regen",  unit: "km",  len: 4, fmtType: "u32_div1000",     formula: "raw / 1000",                    fmt: v => v.toFixed(0) },
+    { key: "115E", name: "Zaman / Regen",   unit: "dk",  len: 4, fmtType: "u32_div60",       formula: "raw / 60",                      fmt: v => v.toFixed(0) },
+    { key: "11F6", name: "DPF Sınır",       unit: "g",   len: 2, fmtType: "u16_div100",      formula: "raw / 100",                     fmt: v => v.toFixed(2) },
+    { key: "11B2", name: "EGT 1 (Pre)",     unit: "°C",  len: 2, fmtType: "u16_div10_m2731", formula: "(raw / 10) - 273.1",            fmt: v => v.toFixed(0) },
+    { key: "10F9", name: "EGT 2 (Post)",    unit: "°C",  len: 2, fmtType: "u16_div10_m2731", formula: "(raw / 10) - 273.1",            fmt: v => v.toFixed(0) },
+    { key: "1628", name: "İntake Temp",     unit: "°C",  len: 2, fmtType: "u16_div10_m2731", formula: "(raw / 10) - 273.1",            fmt: v => v.toFixed(0) },
+    { key: "163A", name: "Ana Enj.",        unit: "mg",  len: 2, fmtType: "u16_div100",      formula: "raw / 100",                     fmt: v => v.toFixed(2) },
+    { key: "163B", name: "Post Enj 2",      unit: "mg",  len: 2, fmtType: "u16_div100",      formula: "raw / 100",                     fmt: v => v.toFixed(2) },
+    { key: "167D", name: "Post Enj 3",      unit: "mg",  len: 2, fmtType: "u16_div100",      formula: "raw / 100",                     fmt: v => v.toFixed(2) },
+    { key: "1314", name: "LP-EGR",          unit: "%",   len: 2, fmtType: "u16_div100",      formula: "raw / 100",                     fmt: v => v.toFixed(1) },
+    { key: "105C", name: "Şarj Yükü",       unit: "%",   len: 2, fmtType: "u16_div8192",     formula: "raw / 81.92",                   fmt: v => v.toFixed(0) },
+    { key: "1116", name: "Radyatör Fanı",   unit: "%",   len: 2, fmtType: "u16_div100",      formula: "raw / 100",                     fmt: v => v.toFixed(0) },
+    { key: "16A9", name: "Odometer",        unit: "km",  len: 4, fmtType: "raw",             formula: "raw",                           fmt: v => v.toFixed(0) },
+    { key: "11B6", name: "Regen Sayısı",    unit: "",    len: 2, fmtType: "raw",             formula: "raw",                           fmt: v => v.toFixed(0) },
+    { key: "1347", name: "Regen Süresi",    unit: "dk",  len: 4, fmtType: "u32_div60",       formula: "raw / 60",                      fmt: v => v.toFixed(0) }
+];
+
+const DID_MAP = {};
+DID_LIST.forEach(d => { DID_MAP[d.key] = d; });
+
+const DICT = {};
+DID_LIST.forEach(d => {
+    if (d.key !== "181A") DICT[d.key] = { name: d.name, unit: d.unit, fmt: d.fmt };
+});
+DICT["DPF_PERC"] = { name: "DPF Doluluk", unit: "%", fmt: v => v.toFixed(1) };
+
+// Generic, anonymized MQB sample module list (zero personal VIN or serial data)
+const MQB_MODULES = [
+    { tx: 0x7E0, name: "Engine (01)",   present: true,  pn: "04L906021AE" },
+    { tx: 0x7E1, name: "Trans (02)",    present: false, pn: null },
+    { tx: 0x713, name: "ABS/ESP (03)",  present: true,  pn: "5Q0907379CK" },
+    { tx: 0x714, name: "Cluster (17)",  present: true,  pn: "5E0920871A" },
+    { tx: 0x710, name: "Gateway (19)",  present: true,  pn: "5Q0907530L" },
+    { tx: 0x70E, name: "CentElec (09)", present: true,  pn: "5Q0937084AA" },
+    { tx: 0x715, name: "HVAC (08)",     present: true,  pn: "5E0907044H" },
+    { tx: 0x712, name: "PwrSteer (44)", present: true,  pn: "5Q0909144L" },
+    { tx: 0x745, name: "Airbag (15)",   present: true,  pn: "3Q0959655A" },
+    { tx: 0x773, name: "InfoEnt (5F)",  present: true,  pn: "5E0035812A" },
+    { tx: 0x74A, name: "DrvDoor (42)",  present: true,  pn: "5Q4959593" }
+];
+
+const defaultLayout = ["F405", "11BE", "105E", "DPF_PERC", "11B2", "10F9", "114F", "11F6"];
+function loadLayout() {
+    try {
+        const raw = localStorage.getItem("canocty_demo_layout");
+        if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr) && arr.length === 8 && arr.every(k => DICT[k])) return arr;
+        }
+    } catch (e) {}
+    return defaultLayout.slice();
+}
+
+let currentLayout = loadLayout();
+let currentTab = "mfd";
+let scenario = "idle";
+let manualThrottle = null;
+let busState = 0; // 0=ACTIVE, 1=IDLE, 2=SLEEP
+let sleepStartedAt = 0;
+let canPaused = false;
+let targetBoost = 0;
+let currentBoost = 0;
+let simTick = 0;
+let rrIdx = 0;
+let scanRunId = 0;
+let valRunId = 0;
+
+// Simulated 24 DID telemetry state
+const liveDids = {
+    "F405": 90.0,
+    "11BE": 87.0,
+    "181A": -0.04,
+    "105E": 14.2,
+    "100C": 34.5,
+    "114F": 14.20,
+    "114E": 11.80,
+    "14F5": 18.0,
+    "178C": 38.4,
+    "1156": 342.0,
+    "115E": 420.0,
+    "11F6": 24.00,
+    "11B2": 215.0,
+    "10F9": 188.0,
+    "1628": 28.0,
+    "163A": 4.85,
+    "163B": 0.00,
+    "167D": 0.00,
+    "1314": 34.0,
+    "105C": 8.0,
+    "1116": 10.0,
+    "16A9": 184210,
+    "11B6": 214,
+    "1347": 16
+};
+
+const SCENARIO_NOTES = {
+    idle: "Rölanti senaryosu aktif: Motor 90°C sıcak, emme hafif vakumda (-0.06..+0.02 BAR). Sağdaki 'Gaz Pedalı / Yük' kaydırıcısı ile canlı turbo basıncını elle verebilirsin.",
+    pull: "Gazlama senaryosu aktif: Araç yüklenip +1.55 BAR basınca çıkıyor, gaz bırakınca -0.40 BAR vakuma düşüyor. Üstteki çift yönlü bar 60 FPS akıcılıkla izler.",
+    regen: "Aktif DPF rejenerasyonu simülasyonu: Kurum (Soot Calc) ~%92'den yanarak düşüyor, EGT 1/2 620–650°C'ye çıkıyor, Post Enjeksiyon 2-3 ve fan devreye giriyor.",
+    sleep: "Kontak kapatıldı: Önce 3 saniye CAN: BEKLEME (pasif Listen-Only, 0 TX), ardından CAN: UYKU moduna geçer ve eski veriler ekrandan silinir."
+};
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function encodeDidRaw(def, val) {
+    let raw = 0;
+    switch (def.fmtType) {
+        case "u8_m40":          raw = clamp(Math.round(val + 40), 0, 255); break;
+        case "u16_div10_m2731": raw = clamp(Math.round((val + 273.1) * 10), 0, 65535); break;
+        case "boost_rel":       raw = clamp(Math.round((val * 1000 + 1000) * 4), 0, 65535); break;
+        case "u16_div50":       raw = clamp(Math.round(val * 50), 0, 65535); break;
+        case "u16_div100":      raw = clamp(Math.round(val * 100), 0, 65535); break;
+        case "s16_div100": {
+            const s = clamp(Math.round(val * 100), -32768, 32767);
+            raw = (s < 0) ? (0x10000 + s) : s;
+            break;
+        }
+        case "u16_div10":       raw = clamp(Math.round(val * 10), 0, 65535); break;
+        case "s16_div10": {
+            const s = clamp(Math.round(val * 10), -32768, 32767);
+            raw = (s < 0) ? (0x10000 + s) : s;
+            break;
+        }
+        case "u32_div1000":     raw = clamp(Math.round(val * 1000), 0, 0xFFFFFFFF) >>> 0; break;
+        case "u32_div60":       raw = clamp(Math.round(val * 60), 0, 0xFFFFFFFF) >>> 0; break;
+        case "u16_div8192":     raw = clamp(Math.round(val * 81.92), 0, 65535); break;
+        default:                raw = clamp(Math.round(val), 0, def.len === 4 ? 0xFFFFFFFF : 65535) >>> 0; break;
+    }
+    const bytes = [];
+    for (let i = def.len - 1; i >= 0; i--) {
+        bytes.unshift(raw & 0xFF);
+        raw = Math.floor(raw / 256);
+    }
+    return bytes;
+}
+
+function decodeDidRaw(def, bytes) {
+    let raw = 0;
+    for (let i = 0; i < def.len && i < bytes.length; i++) {
+        raw = raw * 256 + bytes[i];
+    }
+    let signedRaw = raw;
+    if (def.fmtType === "s16_div100" || def.fmtType === "s16_div10") {
+        if (raw >= 0x8000) signedRaw = raw - 0x10000;
+    }
+    let val = 0;
+    switch (def.fmtType) {
+        case "u8_m40":          val = (raw & 0xFF) - 40; break;
+        case "u16_div10_m2731": val = (raw / 10.0) - 273.1; break;
+        case "boost_rel":       val = ((raw * 0.25) - 1000.0) / 1000.0; break;
+        case "u16_div50":       val = raw / 50.0; break;
+        case "u16_div100":      val = raw / 100.0; break;
+        case "s16_div100":      val = signedRaw / 100.0; break;
+        case "u16_div10":       val = raw / 10.0; break;
+        case "s16_div10":       val = signedRaw / 10.0; break;
+        case "u32_div1000":     val = raw / 1000.0; break;
+        case "u32_div60":       val = raw / 60.0; break;
+        case "u16_div8192":     val = raw / 81.92; break;
+        default:                val = raw; break;
+    }
+    return { raw, signedRaw, val };
+}
+
+function toHexBytes(arr) {
+    return arr.map(b => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+}
+
+function pad8Frame(bytes) {
+    const out = bytes.slice(0, 8);
+    while (out.length < 8) out.push(0x55);
+    return toHexBytes(out);
+}
+
+// NAVIGATION & SETTINGS
+function toggleMenu(ev) {
+    if (ev) ev.stopPropagation();
+    const m = document.getElementById("nav_menu");
+    m.style.display = (m.style.display === "block") ? "none" : "block";
+}
+document.addEventListener("click", (e) => {
+    const m = document.getElementById("nav_menu");
+    const btn = document.getElementById("btn_menu");
+    if (m.style.display === "block" && !m.contains(e.target) && e.target !== btn) {
+        m.style.display = "none";
+    }
+});
+
+function switchTab(tab) {
+    document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+    document.getElementById("view_" + tab).classList.add("active");
+    document.getElementById("btn_edit").style.display = (tab === "mfd") ? "inline-block" : "none";
+    document.getElementById("nav_menu").style.display = "none";
+    currentTab = tab;
+}
+
+function renderGrid() {
+    let html = "";
+    for (let i = 0; i < 8; i++) {
+        const key = currentLayout[i];
+        const info = DICT[key] || { name: "--", unit: "", fmt: () => "--" };
+        html += `<div class="slot" id="slot_${i}">
+            <div class="slot-lbl">${info.name}</div>
+            <div class="slot-val" id="val_${i}">-- ${info.unit}</div>
+            ${key === "DPF_PERC" ? `<div class="dpf-mini-bg"><div class="dpf-mini-fill" id="dpf_bar_${i}"></div></div>` : ""}
+        </div>`;
+    }
+    document.getElementById("main_grid").innerHTML = html;
+}
+
+function openSettings() {
+    let html = "";
+    for (let i = 0; i < 8; i++) {
+        html += `<div class="slot-select"><label>Kutu ${i + 1}</label><select id="sel_${i}">`;
+        for (const [k, v] of Object.entries(DICT)) {
+            html += `<option value="${k}" ${currentLayout[i] === k ? "selected" : ""}>${v.name}</option>`;
+        }
+        html += `</select></div>`;
+    }
+    document.getElementById("modal_slots").innerHTML = html;
+    document.getElementById("modal").style.display = "block";
+}
+function closeSettings() { document.getElementById("modal").style.display = "none"; }
+function onModalBackdrop(e) { if (e.target.id === "modal") closeSettings(); }
+function saveSettings() {
+    for (let i = 0; i < 8; i++) currentLayout[i] = document.getElementById(`sel_${i}`).value;
+    try { localStorage.setItem("canocty_demo_layout", JSON.stringify(currentLayout)); } catch (e) {}
+    closeSettings();
+    renderGrid();
+    applyDashboardValues();
+}
+function resetDefaultLayout() {
+    currentLayout = defaultLayout.slice();
+    try { localStorage.setItem("canocty_demo_layout", JSON.stringify(currentLayout)); } catch (e) {}
+    closeSettings();
+    renderGrid();
+    applyDashboardValues();
+}
+
+// STATUS & DASHBOARD RENDERING
+function updateBadges() {
+    const el = document.getElementById("can_status");
+    const clk = document.getElementById("sim_clock");
+    const wakeBtn = document.getElementById("btn_wake");
+    if (busState === 0) {
+        el.innerText = "CAN: AKTİF";
+        el.className = "badge ok";
+        clk.innerText = "BUS_ACTIVE • 500 kbps";
+        wakeBtn.style.display = "none";
+    } else if (busState === 1) {
+        el.innerText = "CAN: BEKLEME";
+        el.className = "badge warn";
+        clk.innerText = "BUS_IDLE • Listen-Only";
+        wakeBtn.style.display = "inline-block";
+    } else {
+        el.innerText = "CAN: UYKU";
+        el.className = "badge warn";
+        clk.innerText = "BUS_SLEEP • Wi-Fi/CAN Pasif";
+        wakeBtn.style.display = "inline-block";
+    }
+}
+
+function applyDashboardValues() {
+    if (busState !== 0) {
+        targetBoost = 0;
+        document.getElementById("val_boost").innerText = "--.-- BAR";
+        for (let i = 0; i < 8; i++) {
+            const info = DICT[currentLayout[i]];
+            document.getElementById(`val_${i}`).innerText = "--" + (info && info.unit ? " " + info.unit : "");
+            if (currentLayout[i] === "DPF_PERC") {
+                const bar = document.getElementById(`dpf_bar_${i}`);
+                if (bar) bar.style.width = "0%";
+            }
+        }
+        return;
+    }
+    targetBoost = liveDids["181A"];
+    const prefix = targetBoost > 0.005 ? "+" : "";
+    document.getElementById("val_boost").innerText = prefix + targetBoost.toFixed(2) + " BAR";
+
+    const dpfPct = (liveDids["114F"] / liveDids["11F6"]) * 100.0;
+    for (let i = 0; i < 8; i++) {
+        const key = currentLayout[i];
+        const info = DICT[key];
+        if (!info) continue;
+        const val = (key === "DPF_PERC") ? dpfPct : liveDids[key];
+        const valEl = document.getElementById(`val_${i}`);
+        valEl.innerText = info.fmt(val) + (info.unit ? " " + info.unit : "");
+        if (key === "DPF_PERC") {
+            const pct = clamp(dpfPct, 0, 100);
+            const bar = document.getElementById(`dpf_bar_${i}`);
+            if (bar) {
+                bar.style.width = pct + "%";
+                bar.style.background = pct > 90 ? "#ef4444" : (pct > 70 ? "#f59e0b" : "#fff");
+            }
+        }
+    }
+}
+
+// SCENARIOS & TELEMETRY SIMULATION
+function setScenario(next) {
+    scenario = next;
+    manualThrottle = null;
+    document.getElementById("btn_auto_thr").style.display = "none";
+    document.getElementById("thr_label").innerText = "Otomatik Senaryo";
+    ["idle", "pull", "regen", "sleep"].forEach(id => {
+        document.getElementById("sc_" + id).classList.toggle("active", id === next);
+    });
+    document.getElementById("scenario_note").innerText = SCENARIO_NOTES[next];
+    simTick = 0;
+
+    if (next === "sleep") {
+        busState = 1;
+        sleepStartedAt = Date.now();
+        pushCanLine("MCP2515 -> BUS_IDLE: ECU sustu, Listen-Only (0 TX, 0 ACK)", "frame-sleep");
+    } else {
+        busState = 0;
+        if (next === "regen") {
+            liveDids["114F"] = 22.10;
+            liveDids["114E"] = 19.40;
+            liveDids["11B2"] = 615.0;
+            liveDids["10F9"] = 638.0;
+            liveDids["1156"] = 0.0;
+            liveDids["115E"] = 4.0;
+            document.getElementById("thr_slider").value = 35;
+        } else if (next === "idle") {
+            liveDids["114F"] = 14.20;
+            liveDids["114E"] = 11.80;
+            liveDids["163B"] = 0.00;
+            liveDids["167D"] = 0.00;
+            liveDids["1156"] = 342.0;
+            liveDids["115E"] = 420.0;
+            document.getElementById("thr_slider").value = 10;
+        } else if (next === "pull") {
+            liveDids["114F"] = 14.35;
+            liveDids["114E"] = 12.10;
+            liveDids["163B"] = 0.00;
+            liveDids["167D"] = 0.00;
+            document.getElementById("thr_slider").value = 78;
+        }
+    }
+    updateBadges();
+    applyDashboardValues();
+}
+
+function onThrottleInput(valStr) {
+    const pct = Number(valStr);
+    if (busState !== 0) {
+        setScenario("idle");
+    }
+    manualThrottle = pct;
+    document.getElementById("thr_label").innerText = "Manuel Gaz: %" + pct;
+    document.getElementById("btn_auto_thr").style.display = "inline-block";
+}
+
+function releaseManualThrottle() {
+    manualThrottle = null;
+    document.getElementById("thr_label").innerText = "Otomatik Senaryo";
+    document.getElementById("btn_auto_thr").style.display = "none";
+}
+
+function stepSimulation() {
+    simTick++;
+    if (scenario === "sleep") {
+        if (busState === 1 && Date.now() - sleepStartedAt >= 3000) {
+            busState = 2;
+            updateBadges();
+            applyDashboardValues();
+            pushCanLine("BUS_SLEEP: Wi-Fi AP kapatıldı, pasif uyku izleniyor...", "frame-sleep");
+        }
+        return;
+    }
+
+    const t = simTick * 0.15;
+    if (manualThrottle !== null) {
+        const u = manualThrottle / 100.0;
+        const targetB = (u < 0.08) ? -0.42 : (-0.10 + Math.pow(u, 1.15) * 1.85);
+        liveDids["181A"] += (targetB - liveDids["181A"]) * 0.35;
+        liveDids["163A"] = clamp(4.2 + u * 44.0, 2.0, 52.0);
+        liveDids["11B2"] += ((210 + u * 380) - liveDids["11B2"]) * 0.18;
+        liveDids["10F9"] += ((185 + u * 310) - liveDids["10F9"]) * 0.15;
+        liveDids["14F5"] = clamp(12 + u * 260, 8, 320);
+        liveDids["1314"] = clamp(38 - u * 35, 0, 45);
+        liveDids["105C"] = clamp(8 + u * 86, 5, 96);
+        liveDids["1628"] = clamp(27 + u * 24, 24, 58);
+        liveDids["1116"] = (scenario === "regen") ? 88 : clamp(10 + u * 25, 10, 60);
+    } else if (scenario === "idle") {
+        liveDids["181A"] = -0.04 + Math.sin(t) * 0.03;
+        liveDids["F405"] = 90 + Math.sin(t * 0.1) * 0.5;
+        liveDids["11BE"] = 87 + Math.sin(t * 0.08) * 0.5;
+        liveDids["105E"] = 14.2 + Math.sin(t * 0.6) * 0.1;
+        liveDids["11B2"] += (215 - liveDids["11B2"]) * 0.15;
+        liveDids["10F9"] += (188 - liveDids["10F9"]) * 0.15;
+        liveDids["14F5"] = 18 + Math.sin(t) * 2.0;
+        liveDids["163A"] = 4.85 + Math.sin(t * 1.2) * 0.25;
+        liveDids["163B"] = 0.00;
+        liveDids["167D"] = 0.00;
+        liveDids["1314"] = 34.0 + Math.sin(t * 0.4) * 2.0;
+        liveDids["105C"] = 8.0;
+        liveDids["1116"] = 10.0;
+    } else if (scenario === "pull") {
+        // Periodic pull climb + lift-off vacuum cycle
+        const phase = (simTick % 46) / 46.0;
+        let load = 0;
+        if (phase < 0.55) {
+            load = Math.sin((phase / 0.55) * (Math.PI / 2));
+        } else if (phase < 0.78) {
+            load = -0.25; // off-throttle vacuum
+        } else {
+            load = 0.15 + ((phase - 0.78) / 0.22) * 0.25;
+        }
+        document.getElementById("thr_slider").value = Math.round(clamp(load, 0, 1) * 100);
+        const b = load >= 0 ? (-0.05 + load * 1.60) : -0.40;
+        liveDids["181A"] += (b - liveDids["181A"]) * 0.45;
+        liveDids["163A"] = load >= 0 ? (5.2 + load * 42.5) : 0.00;
+        liveDids["11B2"] += ((260 + clamp(load, 0, 1) * 310) - liveDids["11B2"]) * 0.18;
+        liveDids["10F9"] += ((220 + clamp(load, 0, 1) * 240) - liveDids["10F9"]) * 0.14;
+        liveDids["14F5"] = clamp(25 + clamp(load, 0, 1) * 255, 10, 290);
+        liveDids["1314"] = clamp(32 - clamp(load, 0, 1) * 32, 0, 40);
+        liveDids["105C"] = clamp(12 + clamp(load, 0, 1) * 84, 5, 98);
+        liveDids["1628"] = clamp(29 + clamp(load, 0, 1) * 22, 26, 55);
+        liveDids["1116"] = 24.0;
+    } else if (scenario === "regen") {
+        liveDids["181A"] = 0.38 + Math.sin(t * 0.7) * 0.14;
+        liveDids["114F"] = Math.max(5.80, liveDids["114F"] - 0.08);
+        if (liveDids["114F"] <= 5.90) liveDids["114F"] = 22.10; // loop regen cleanly
+        liveDids["114E"] = Math.max(4.50, liveDids["114F"] * 0.87);
+        liveDids["11B2"] = 624 + Math.sin(t) * 9;
+        liveDids["10F9"] = 648 + Math.cos(t * 0.8) * 10;
+        liveDids["14F5"] = clamp(18 + (liveDids["114F"] / 24.0) * 95 + Math.sin(t) * 6, 15, 140);
+        liveDids["163A"] = 12.4 + Math.sin(t) * 1.1;
+        liveDids["163B"] = 4.82 + Math.sin(t * 1.3) * 0.28;
+        liveDids["167D"] = 3.15 + Math.cos(t * 1.1) * 0.22;
+        liveDids["1314"] = 0.0;
+        liveDids["105C"] = 42.0;
+        liveDids["1116"] = 88.0;
+        liveDids["1347"] = 16 + Math.floor((22.1 - liveDids["114F"]) * 0.8);
+    }
+
+    applyDashboardValues();
+    emitLiveCanPair();
+}
+
+// LIVE CAN-BUS FRAME MONITOR
+const canLines = [];
+function pushCanLine(text, cls) {
+    if (canPaused) return;
+    canLines.push({ text, cls });
+    while (canLines.length > 8) canLines.shift();
+    const el = document.getElementById("can_log");
+    el.innerHTML = canLines.map(l => `<div class="frame-line ${l.cls}">${escapeHtml(l.text)}</div>`).join("");
+    el.scrollTop = el.scrollHeight;
+}
+function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function toggleCanPause() {
+    canPaused = !canPaused;
+    document.getElementById("btn_pause_can").innerText = canPaused ? "Devam Et" : "Durdur";
+}
+function emitLiveCanPair() {
+    if (busState !== 0 || canPaused) return;
+    // Mirror Pico core behavior: prioritize VIP Boost (0x181A) + rotate other DIDs
+    const def = (simTick % 2 === 0) ? DID_MAP["181A"] : DID_LIST[rrIdx % DID_LIST.length];
+    if (simTick % 2 !== 0) rrIdx++;
+    const didHi = parseInt(def.key.slice(0, 2), 16);
+    const didLo = parseInt(def.key.slice(2, 4), 16);
+    const val = liveDids[def.key];
+    const dataBytes = encodeDidRaw(def, val);
+    const pciLen = 3 + dataBytes.length;
+
+    pushCanLine(`TX 0x7E0 [8] ${pad8Frame([0x03, 0x22, didHi, didLo])}`, "frame-tx");
+    pushCanLine(`RX 0x7E8 [8] ${pad8Frame([pciLen, 0x62, didHi, didLo, ...dataBytes])}  // ${def.name}: ${def.fmt(val)}${def.unit ? " " + def.unit : ""}`, "frame-rx");
+}
+
+// CUSTOM RAW UDS QUERY (SIMULATED)
+function getVagRxId(txId) {
+    return (txId >= 0x7E0 && txId <= 0x7E7) ? (txId + 0x08) : (txId + 0x6A);
+}
+function setMod(hex) {
+    document.getElementById("inp_mod").value = hex;
+    document.getElementById("inp_rx").value = "";
+    updateRxHint();
+}
+function quickDid(mod, did) {
+    setMod(mod);
+    document.getElementById("inp_did").value = did;
+    sendCustom();
+}
+function updateRxHint() {
+    const modVal = parseInt(document.getElementById("inp_mod").value.trim(), 16);
+    const rxRaw = document.getElementById("inp_rx").value.trim();
+    const el = document.getElementById("rx_hint");
+    if (isNaN(modVal) || modVal < 0x700 || modVal > 0x7EF) {
+        el.innerText = "Geçersiz TX adresi (0x700..0x7EF arası girin)";
+        el.style.color = "#f87171";
+        return;
+    }
+    if (rxRaw) {
+        const rxVal = parseInt(rxRaw, 16);
+        if (isNaN(rxVal) || rxVal < 0x700 || rxVal > 0x7FF) {
+            el.innerText = "Geçersiz manuel RX adresi (0x700..0x7FF)";
+            el.style.color = "#f87171";
+            return;
+        }
+        el.innerText = "Beklenen Yanıt (RX): 0x" + rxVal.toString(16).toUpperCase() + " (Manuel)";
+        el.style.color = "#fbbf24";
+        return;
+    }
+    const autoRx = (modVal >= 0x7E0 && modVal <= 0x7E7) ? (modVal + 8) : (modVal + 0x6A);
+    if (autoRx > 0x7FF) {
+        el.innerText = "Otomatik RX (0x" + autoRx.toString(16).toUpperCase() + ") > 0x7FF — Manuel RX girin";
+        el.style.color = "#f87171";
+        return;
+    }
+    el.innerText = "Beklenen Yanıt (RX): 0x" + autoRx.toString(16).toUpperCase() + " (Otomatik)";
+    el.style.color = "#4ade80";
+}
+
+function clearTerm(id) { document.getElementById(id).textContent = ""; }
+function appendTerm(id, line) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    let lines = el.textContent ? el.textContent.split("\n") : [];
+    if (lines.length === 1 && (lines[0].startsWith("Hazır.") || lines[0].startsWith("Loglar bekleniyor"))) {
+        lines = [];
+    }
+    lines.push(line);
+    if (lines.length > 200) lines = lines.slice(-200);
+    el.textContent = lines.join("\n");
+    el.scrollTop = el.scrollHeight;
+}
+
+function parseStrictHex16(s) {
+    if (!/^[0-9A-Fa-f]{1,4}$/.test(s)) return NaN;
+    return parseInt(s, 16);
+}
+
+function sendCustom() {
+    const modRaw = document.getElementById("inp_mod").value.trim().toUpperCase();
+    const didRaw = document.getElementById("inp_did").value.trim().toUpperCase().padStart(4, "0");
+    const rxRaw  = document.getElementById("inp_rx").value.trim().toUpperCase();
+
+    const reqId = parseStrictHex16(modRaw);
+    const did   = parseStrictHex16(didRaw);
+    if (isNaN(reqId) || isNaN(did)) {
+        appendTerm("term_custom", "[HATA] Gecersiz Hex modul veya DID formati.");
+        return;
+    }
+    let resId = getVagRxId(reqId);
+    let autoRes = true;
+    if (rxRaw) {
+        resId = parseStrictHex16(rxRaw);
+        if (isNaN(resId)) {
+            appendTerm("term_custom", "[HATA] Gecersiz Hex manuel RX formati.");
+            return;
+        }
+        autoRes = false;
+    }
+
+    const reqHex = reqId.toString(16).toUpperCase().padStart(3, "0");
+    const resHex = resId.toString(16).toUpperCase().padStart(3, "0");
+    const didHex = did.toString(16).toUpperCase().padStart(4, "0");
+
+    if (reqId < 0x700 || reqId > 0x7EF || resId < 0x700 || resId > 0x7FF) {
+        appendTerm("term_custom", `[GECERSIZ] TX=0x${reqHex} RX=0x${resHex} (Sadece 0x700..0x7FF izinli)`);
+        return;
+    }
+
+    appendTerm("term_custom", "--- Ozel UDS Sorgu ---");
+    appendTerm("term_custom", `TX: 0x${reqHex} | RX: 0x${resHex} (${autoRes ? "Oto" : "Manuel"}) | DID: 0x${didHex}`);
+
+    const didHi = (did >> 8) & 0xFF;
+    const didLo = did & 0xFF;
+    pushCanLine(`TX 0x${reqHex} [8] ${pad8Frame([0x03, 0x22, didHi, didLo])}`, "frame-tx");
+
+    if (busState === 2) {
+        appendTerm("term_custom", `[ZAMAN ASIMI]: Araç uykuda (0x${resHex} yanit vermedi). Sağdan CAN'i uyandırın.`);
+        appendTerm("term_custom", "--- ISLEM TAMAMLANDI ---");
+        return;
+    }
+
+    const modInfo = MQB_MODULES.find(m => m.tx === reqId && m.present);
+    const expectedRx = getVagRxId(reqId);
+    if (!modInfo || resId !== expectedRx) {
+        appendTerm("term_custom", `[ZAMAN ASIMI]: 0x${resHex} adresinden cevap gelmedi.`);
+        appendTerm("term_custom", "--- ISLEM TAMAMLANDI ---");
+        return;
+    }
+
+    // 1. 24 EA288 DIDs on Engine (0x7E0)
+    if (reqId === 0x7E0 && DID_MAP[didHex]) {
+        const def = DID_MAP[didHex];
+        const val = liveDids[didHex];
+        const bytes = encodeDidRaw(def, val);
+        const hexStr = toHexBytes(bytes);
+        appendTerm("term_custom", `[YANIT Single-Frame] ${bytes.length} byte:`);
+        appendTerm("term_custom", `  ${hexStr} `);
+        appendTerm("term_custom", `  [COZUM]: ${def.name} = ${def.fmt(val)}${def.unit ? " " + def.unit : ""}`);
+        pushCanLine(`RX 0x${resHex} [8] ${pad8Frame([3 + bytes.length, 0x62, didHi, didLo, ...bytes])}`, "frame-rx");
+        appendTerm("term_custom", "--- ISLEM TAMAMLANDI ---");
+        return;
+    }
+
+    // 2. DID 0xF187 (VW/Audi Part Number)
+    if (did === 0xF187) {
+        const ascii = modInfo.pn.padEnd(11, " ");
+        const bytes = Array.from(ascii).map(c => c.charCodeAt(0));
+        appendTerm("term_custom", `[YANIT Multi-Frame] ${bytes.length} byte:`);
+        appendTerm("term_custom", `  ${toHexBytes(bytes)} `);
+        appendTerm("term_custom", `  [ASCII]: ${ascii.trim()}`);
+        pushCanLine(`RX 0x${resHex} [8] 10 ${(3 + bytes.length).toString(16).toUpperCase().padStart(2, "0")} 62 F1 87 ${toHexBytes(bytes.slice(0, 3))}`, "frame-rx");
+        appendTerm("term_custom", "--- ISLEM TAMAMLANDI ---");
+        return;
+    }
+
+    // 3. DID 0xF190 (VIN - clearly fictional demo string)
+    if (did === 0xF190 && (reqId === 0x7E0 || reqId === 0x714 || reqId === 0x70E)) {
+        const demoVin = "TMBDEMO00E0000001";
+        const bytes = Array.from(demoVin).map(c => c.charCodeAt(0));
+        appendTerm("term_custom", `[YANIT Multi-Frame] ${bytes.length} byte:`);
+        appendTerm("term_custom", `  ${toHexBytes(bytes.slice(0, 16))} `);
+        appendTerm("term_custom", `  ${toHexBytes(bytes.slice(16))} `);
+        appendTerm("term_custom", `  [ASCII]: ${demoVin}`);
+        pushCanLine(`RX 0x${resHex} [8] 10 14 62 F1 90 ${toHexBytes(bytes.slice(0, 3))}`, "frame-rx");
+        appendTerm("term_custom", "--- ISLEM TAMAMLANDI ---");
+        return;
+    }
+
+    // 4. DID 0x04A0 on Gateway (0x710)
+    if (reqId === 0x710 && did === 0x04A0) {
+        const gwBytes = [0x01,0x21,0x03,0x21,0x08,0x21,0x09,0x21,0x15,0x21,0x17,0x21,0x19,0x21,0x42,0x21,0x44,0x21,0x52,0x21,0x5F,0x21];
+        appendTerm("term_custom", `[YANIT Multi-Frame] ${gwBytes.length} byte:`);
+        appendTerm("term_custom", `  ${toHexBytes(gwBytes.slice(0, 16))} `);
+        appendTerm("term_custom", `  ${toHexBytes(gwBytes.slice(16))} `);
+        pushCanLine(`RX 0x${resHex} [8] 10 19 62 04 A0 ${toHexBytes(gwBytes.slice(0, 3))}`, "frame-rx");
+        appendTerm("term_custom", "--- ISLEM TAMAMLANDI ---");
+        return;
+    }
+
+    // 5. Fallback UDS Negative Response 0x31
+    appendTerm("term_custom", "[UDS REDDI]: 7F 22 31 (RequestOutOfRange)");
+    pushCanLine(`RX 0x${resHex} [8] 03 7F 22 31 55 55 55 55  // NRC: RequestOutOfRange`, "frame-err");
+    appendTerm("term_custom", "--- ISLEM TAMAMLANDI ---");
+}
+
+// SIMULATED GATEWAY SCANNER
+function runSimulatedScan() {
+    const id = ++scanRunId;
+    clearTerm("term_scan");
+    appendTerm("term_scan", "--- VAG MQB MODUL & GATEWAY TARAMASI ---");
+    if (busState === 2) {
+        appendTerm("term_scan", "[0x710] Extended Session (10 03): Yanit yok (Araç Uykuda)");
+        appendTerm("term_scan", "--- TARAMA TAMAMLANDI (ARAC UYKUDA) ---");
+        return;
+    }
+
+    const lines = [
+        "[0x710] Extended Session (10 03): OK",
+        "[0x77A] DID 0x04A0 (22 byte):",
+        "  01 21 03 21 08 21 09 21 15 21 17 21 19 21 42 21 ",
+        "  44 21 52 21 5F 21 "
+    ];
+    MQB_MODULES.forEach(m => {
+        const rx = getVagRxId(m.tx).toString(16).toUpperCase().padStart(3, "0");
+        const tx = m.tx.toString(16).toUpperCase().padStart(3, "0");
+        const padName = m.name.padEnd(14, " ");
+        if (m.present) {
+            lines.push(`[BULUNDU] ${padName} 0x${tx}->0x${rx} | PN: ${m.pn}`);
+        } else {
+            lines.push(`[YOK]     ${padName} 0x${tx}->0x${rx} | Zaman asimi`);
+        }
+    });
+    lines.push("--- TARAMA TAMAMLANDI ---");
+
+    let idx = 0;
+    function step() {
+        if (id !== scanRunId) return;
+        if (idx < lines.length) {
+            appendTerm("term_scan", lines[idx++]);
+            setTimeout(step, 85);
+        }
+    }
+    step();
+}
+
+// SIMULATED 24 DID VALIDATOR
+function runSimulatedValidation() {
+    const id = ++valRunId;
+    clearTerm("term_val");
+    appendTerm("term_val", "--- 24 ECU DID DOGRULAMASI (0x7E0 -> 0x7E8) ---");
+    if (busState === 2) {
+        appendTerm("term_val", "[FAIL ] Araç uykuda — doğrulama için sağdan CAN'i uyandırın.");
+        appendTerm("term_val", "--- DOGRULAMA BITTI: 0 / 24 BASARILI ---");
+        return;
+    }
+
+    let i = 0;
+    function step() {
+        if (id !== valRunId) return;
+        if (i < DID_LIST.length) {
+            const d = DID_LIST[i++];
+            const val = liveDids[d.key];
+            appendTerm("term_val", `[OK-SF] 0x${d.key} (${String(d.len).padStart(2, " ")} B) -> ${val.toFixed(2)}`);
+            setTimeout(step, 55);
+        } else {
+            appendTerm("term_val", "--- DOGRULAMA BITTI: 24 / 24 BASARILI ---");
+        }
+    }
+    step();
+}
+
+// 24 DID HEX DECODER
+function populateDecoderSelect() {
+    const sel = document.getElementById("dec_did");
+    sel.innerHTML = DID_LIST.map(d => `<option value="${d.key}">0x${d.key} — ${d.name} (${d.unit || "sayı"})</option>`).join("");
+    sel.value = "181A";
+}
+
+function onDecoderDidChange() {
+    grabLiveHex();
+}
+
+function grabLiveHex() {
+    const key = document.getElementById("dec_did").value;
+    const def = DID_MAP[key];
+    if (!def) return;
+    const bytes = encodeDidRaw(def, liveDids[key]);
+    document.getElementById("dec_hex").value = toHexBytes(bytes);
+    renderHexDecode();
+}
+
+function renderHexDecode() {
+    const key = document.getElementById("dec_did").value;
+    const def = DID_MAP[key];
+    const rawStr = document.getElementById("dec_hex").value.trim().replace(/0x/gi, "").replace(/[^0-9A-Fa-f]/g, "");
+    const resEl = document.getElementById("decode_result");
+    const signedLabel = (def.fmtType === "s16_div100" || def.fmtType === "s16_div10") ? "Signed int16 Big-Endian" : "Unsigned Big-Endian";
+
+    if (rawStr.length < def.len * 2 || rawStr.length % 2 !== 0) {
+        resEl.innerHTML = `
+            <div><span class="dec-k">Beklenen Boyut</span><span class="dec-v">${def.len} Byte (${signedLabel})</span></div>
+            <div><span class="dec-k">Formül</span><span class="dec-v">${def.formula}</span></div>
+            <div style="grid-column: 1 / -1;"><span class="dec-k">Durum</span><span class="dec-v bad">En az ${def.len * 2} adet geçerli hex karakter girin (örn: ${toHexBytes(encodeDidRaw(def, liveDids[key]))}).</span></div>
+        `;
+        return;
+    }
+
+    const bytes = [];
+    for (let i = 0; i < def.len * 2; i += 2) {
+        bytes.push(parseInt(rawStr.slice(i, i + 2), 16));
+    }
+    const { raw, signedRaw, val } = decodeDidRaw(def, bytes);
+    const hexNorm = toHexBytes(bytes);
+    const rawDisplay = (signedRaw !== raw)
+        ? `0x${hexNorm.replace(/ /g, "")} = ${raw} (int16: ${signedRaw})`
+        : `0x${hexNorm.replace(/ /g, "")} = ${raw}`;
+
+    resEl.innerHTML = `
+        <div><span class="dec-k">Boyut & Tip</span><span class="dec-v">${def.len} Byte • ${signedLabel}</span></div>
+        <div><span class="dec-k">Ham Değer</span><span class="dec-v">${rawDisplay}</span></div>
+        <div><span class="dec-k">Formül</span><span class="dec-v">${def.formula}</span></div>
+        <div><span class="dec-k">Çözülen Değer</span><span class="dec-v big">${def.fmt(val)}${def.unit ? " " + def.unit : ""}</span></div>
+    `;
+}
+
+// 60 FPS SMOOTH BOOST BAR
+const elBarBoost = document.getElementById("bar_boost");
+const elBarVac   = document.getElementById("bar_vac");
+function anim() {
+    currentBoost += (targetBoost - currentBoost) * 0.18;
+    if (currentBoost >= 0) {
+        const s = Math.min(1, currentBoost / 2.0);
+        elBarBoost.style.transform = `scaleX(${s.toFixed(4)})`;
+        elBarVac.style.transform = "scaleX(0)";
+    } else {
+        const s = Math.min(1, Math.abs(currentBoost) / 0.6);
+        elBarVac.style.transform = `scaleX(${s.toFixed(4)})`;
+        elBarBoost.style.transform = "scaleX(0)";
+    }
+    requestAnimationFrame(anim);
+}
+
+// BOOT
+renderGrid();
+updateRxHint();
+populateDecoderSelect();
+setScenario("idle");
+grabLiveHex();
+setInterval(stepSimulation, 150);
+requestAnimationFrame(anim);
+</script>
+</body>
+</html>

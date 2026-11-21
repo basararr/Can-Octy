@@ -4,6 +4,8 @@ Kendi Skoda Octavia MY13 (MQB, 1.6 TDI EA288 CLHA) aracımda DPF doluluğunu, EG
 
 Başta işi küçük tutup Arduino Nano, MCP2515 ve ufak bir OLED ekranla başladım. Hazır ODX dosyası ya da ücretli teşhis cihazı kullanmadan, motor beynindeki (`0x7E0`) 24 farklı DID adresini ve ölçekleme formüllerini araç üstünde tek tek deneyerek çıkardım. Bir noktadan sonra Nano'nun belleği ve küçük ekran yetmeyince Raspberry Pi Pico 2 W'ye geçtim. Şimdi cihaz OBD-II portuna takılı, kendi Wi-Fi ağını açıyor; telefondan tarayıcıyla canlı ekrana bakabiliyorum, kod değiştireceğim zaman da kabloyla uğraşmadan Wi-Fi üzerinden OTA ile atıyorum.
 
+> **Canlı Demo (Tarayıcı Simülatörü):** [basararr.github.io/Can-Octy](https://basararr.github.io/Can-Octy/) — Arabaya bağlanmadan MFD ekranını, sürüş/DPF rejenerasyon senaryolarını, ham UDS özel sorguyu ve 24 DID hex çözücüyü tarayıcıda deneyebilirsin.
+
 ## Arayüz
 
 `vag_pico_custom_query` içindeki web arayüzünün örnek 1.6 TDI verileriyle görünümü:
