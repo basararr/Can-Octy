@@ -44,5 +44,5 @@ Wi-Fi kullanıcı adı ve şifresi repoya açık yazılmaması için koddan ayr�
 
 ## Notlar
 
-- Kodlar şimdilik arşiv ve yedek amaçlı eski haliyle yüklendi; iyileştirme ve hata düzeltmeleri daha sonra yapılacaktır.
-- `vag_pico_custom_query` içinde `executeCustomQuery()` yanıt adresini `reqId + 0x08` olarak hesaplar ve `MODE_SCAN` `0x718` dinler; `0x7E0` altı VAG modülleri (örneğin Gateway `0x710`) için `+0x6A` (`0x77A`) düzeltmesi yapılacaklar arasındadır.
+- `vag_pico_custom_query/` dışındaki eski klasörler arşiv ve referans amaçlı ilk halleriyle korunmuştur.
+- `vag_pico_custom_query/` sürümünde ISO-TP/UDS akışı, VAG `+0x6A` / `+0x08` yanıt adresi kuralı, çift yönlü beyaz turbo barı, sıfır heap WebSocket yayını ve pasif `Listen-Only` uyku yönetimi modernize edilip `arduino-cli` (`rp2040:rp2040:rpipico2w`) ile doğrulanmıştır.
