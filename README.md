@@ -51,11 +51,16 @@ En güncel ve en kapsamlı çalışma `vag_pico_custom_query` klasöründedir. D
 - CAN `CS`: D10, `INT`: D2
 - OLED `CS`: D9, `DC`: D8, `RES`: D7
 
-## Wi-Fi AP Kurulumu (Pico Sketch'leri)
+## Wi-Fi AP ve OTA Kurulumu (Pico Sketch'leri)
 
 Wi-Fi kullanıcı adı ve şifresi repoya açık yazılmaması için koddan ayrılmıştır. Pico kodlarından birini derlemeden önce ilgili klasördeki `secrets.h.example` dosyasını `secrets.h` adıyla kopyalayıp içindeki `AP_SSID` ve `AP_PASS` değerlerini düzenleyin (şifre WPA2 için en az 8 karakter olmalıdır). `secrets.h` dosyası `.gitignore` içindedir.
+
+`vag_pico_custom_query` Wi-Fi üzerinden `ArduinoOTA` ile kod yüklemeyi destekler (`LittleFS` bölümü gerekir). Arduino IDE kart ayarları:
+- **Board:** `Raspberry Pi Pico 2 W`
+- **Flash Size:** `4MB (Sketch: 2MB, FS: 2MB)`
 
 ## Notlar
 
 - `vag_pico_custom_query/` dışındaki eski klasörler arşiv ve referans amaçlı ilk halleriyle korunmuştur.
-- `vag_pico_custom_query/` sürümünde ISO-TP/UDS akışı, VAG `+0x6A` / `+0x08` yanıt adresi kuralı, çift yönlü beyaz turbo barı, sıfır heap WebSocket yayını ve pasif `Listen-Only` uyku yönetimi modernize edilip `arduino-cli` (`rp2040:rp2040:rpipico2w`) ile doğrulanmıştır.
+- `vag_pico_custom_query/` sürümünde ISO-TP/UDS akışı, VAG `+0x6A` / `+0x08` yanıt adresi kuralı, çift yönlü beyaz turbo barı, sıfır heap WebSocket yayını, MCP2515 mod önbelleği, Core 1 watchdog takibi ve pasif `Listen-Only` uyku yönetimi modernize edilip `arduino-cli` (`rp2040:rp2040:rpipico2w:flash=4194304_2097152`) ile doğrulanmıştır.
+- Araçtaki OBD-II portunda sürekli 12V (`KL30`) bulunuyorsa uyku modunda CAN hattını uyanık tutmamak için `Listen-Only` kullanılır (ancak uzun parklarda Pico besleme çekmeye devam eder); kontak elektriği (`KL15`) veya ayrı kesici kullanıldığında boşta akü tüketimi tamamen sıfırlanır. Kapı/kontak açıldığında gelen CAN trafiği cihazı yeniden başlatarak Wi-Fi ve OTA'yı tekrar açar.

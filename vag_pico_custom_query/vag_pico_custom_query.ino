@@ -26,6 +26,7 @@
 
 static constexpr uint32_t CAN_SPI_HZ          = 8000000UL;
 static constexpr uint32_t WDT_TIMEOUT_MS      = 8000UL;
+static constexpr uint32_t CORE1_STALL_MS      = 5000UL;    // Core 1 hang threshold before WDT reboots
 static constexpr uint32_t WS_BROADCAST_MS     = 33UL;      // ~30 Hz when data changes
 static constexpr uint32_t WS_HEARTBEAT_MS     = 500UL;     // 2 Hz bus state heartbeat
 static constexpr uint32_t IDLE_PROBE_MS       = 5000UL;    // Gentle probe interval only when bus has traffic
@@ -135,7 +136,8 @@ static volatile bool    g_core1Paused    = false;
 static volatile bool    g_probeRequested = false;
 static volatile bool    g_sleepRequested = false;
 static volatile bool    g_core0Sleeping  = false;
-static volatile uint8_t g_wsClientCount  = 0;
+static volatile uint8_t  g_wsClientCount    = 0;
+static volatile uint32_t g_core1HeartbeatMs = 0;
 
 // Fixed-capacity Ring Buffer for Log Messages (zero heap allocations)
 static constexpr size_t LOG_RING_CAP = 32;
@@ -173,6 +175,8 @@ static void pushLogf(const char* fmt, ...) {
 static MCP2515* can = nullptr;
 static bool     g_diagFilterActive   = false;
 static bool     g_normalModeDesired  = false;
+static bool     g_hwModeValid        = false;
+static bool     g_hwNormalMode       = false;
 static uint32_t g_lastBusTrafficMs   = 0;
 static uint32_t g_lastIdleProbeMs    = 0;
 static uint32_t g_lastInitRetryMs    = 0;
@@ -243,12 +247,19 @@ static void handleCanErrors() {
   }
   if (eflg & MCP2515::EFLG_TXBO) {
     // Recover cleanly from Bus-Off while respecting current passive/normal mode.
+    g_hwModeValid = false;
     can->clearInterrupts();
     can->setConfigMode();
     if (g_normalModeDesired) {
-      can->setNormalMode();
+      if (can->setNormalMode() == MCP2515::ERROR_OK) {
+        g_hwNormalMode = true;
+        g_hwModeValid = true;
+      }
     } else {
-      can->setListenOnlyMode();
+      if (can->setListenOnlyMode() == MCP2515::ERROR_OK) {
+        g_hwNormalMode = false;
+        g_hwModeValid = true;
+      }
     }
   } else {
     can->clearERRIF();
@@ -272,6 +283,7 @@ static void drainRxBuffer(uint8_t maxFrames) {
 // call setNormalMode() or setListenOnlyMode() immediately after!
 static bool setCanFiltersDiagnostic() {
   if (!can) return false;
+  g_hwModeValid = false;
   if (can->setFilterMask(MCP2515::MASK0, false, 0x700) != MCP2515::ERROR_OK) return false;
   if (can->setFilterMask(MCP2515::MASK1, false, 0x700) != MCP2515::ERROR_OK) return false;
   const MCP2515::RXF rxf[6] = {
@@ -287,6 +299,7 @@ static bool setCanFiltersDiagnostic() {
 
 static bool setCanFiltersPromiscuous() {
   if (!can) return false;
+  g_hwModeValid = false;
   if (can->setFilterMask(MCP2515::MASK0, false, 0x000) != MCP2515::ERROR_OK) return false;
   if (can->setFilterMask(MCP2515::MASK1, false, 0x000) != MCP2515::ERROR_OK) return false;
   const MCP2515::RXF rxf[6] = {
@@ -304,24 +317,40 @@ static bool setCanFiltersPromiscuous() {
 static void enterListenOnlyPassive() {
   if (!can) return;
   g_normalModeDesired = false;
+  if (!g_diagFilterActive && g_hwModeValid && !g_hwNormalMode) return;
   if (g_diagFilterActive) {
     setCanFiltersPromiscuous();
   }
-  can->setListenOnlyMode();
+  if (can->setListenOnlyMode() == MCP2515::ERROR_OK) {
+    g_hwNormalMode = false;
+    g_hwModeValid = true;
+  } else {
+    g_hwModeValid = false;
+  }
   handleCanErrors();
 }
 
 static void enterNormalDiagnostic() {
   if (!can) return;
   g_normalModeDesired = true;
+  if (g_diagFilterActive && g_hwModeValid && g_hwNormalMode) return;
   if (!g_diagFilterActive) {
     setCanFiltersDiagnostic();
   }
-  can->setNormalMode();
+  if (can->setNormalMode() == MCP2515::ERROR_OK) {
+    g_hwNormalMode = true;
+    g_hwModeValid = true;
+  } else {
+    g_hwModeValid = false;
+  }
   handleCanErrors();
 }
 
 static bool initCanController() {
+  g_hwModeValid = false;
+  g_hwNormalMode = false;
+  g_diagFilterActive = false;
+
   if (can == nullptr) {
     SPI.setRX(PIN_CAN_MISO);
     SPI.setSCK(PIN_CAN_SCK);
@@ -344,6 +373,8 @@ static bool initCanController() {
     return false;
   }
   g_normalModeDesired = true;
+  g_hwNormalMode = true;
+  g_hwModeValid = true;
   return true;
 }
 
@@ -366,6 +397,7 @@ static bool udsStartSession(uint16_t reqId, uint16_t resId, uint8_t sessionType)
   uint32_t timeoutMs = 120;
   struct can_frame rx;
   while (millis() - startMs < timeoutMs) {
+    g_core1HeartbeatMs = millis();
     if (g_isUpdating) return false;
     if (can->readMessage(&rx) == MCP2515::ERROR_OK) {
       g_lastBusTrafficMs = millis();
@@ -424,6 +456,7 @@ static bool udsReadDid(uint16_t reqId, uint16_t resId, uint16_t did, uint8_t* ou
   struct can_frame rx;
 
   while (millis() - startMs < timeoutMs) {
+    g_core1HeartbeatMs = millis();
     if (g_isUpdating) return false;
     if (can->readMessage(&rx) != MCP2515::ERROR_OK) {
       handleCanErrors();
@@ -635,6 +668,7 @@ static void executeGatewayScan() {
   };
 
   for (size_t t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {
+    g_core1HeartbeatMs = millis();
     if (g_isUpdating) break;
     uint16_t txId = targets[t].txId;
     uint16_t rxId = getVagRxId(txId);
@@ -673,6 +707,7 @@ static void executeDidValidation() {
   int okCount = 0;
 
   for (size_t i = 0; i < NUM_DIDS; i++) {
+    g_core1HeartbeatMs = millis();
     if (g_isUpdating) break;
     bool ok = udsReadDid(0x7E0, 0x7E8, DID_DEFS[i].did, buf, sizeof(buf), &rxLen, nullptr, &nrc, &st, 160);
     if (ok) {
@@ -756,6 +791,7 @@ static void executeCustomQuery(uint16_t reqId, uint16_t resId, bool autoRes, uin
 }
 
 void setup1() {
+  g_core1HeartbeatMs = millis();
   if (initCanController()) {
     g_lastBusTrafficMs = 0;
     setBusState(BUS_IDLE);
@@ -765,9 +801,11 @@ void setup1() {
     setBusState(BUS_INIT_FAIL);
     g_lastInitRetryMs = millis();
   }
+  g_core1HeartbeatMs = millis();
 }
 
 void loop1() {
+  g_core1HeartbeatMs = millis();
   if (g_isUpdating) {
     if (!g_core1Paused) {
       enterListenOnlyPassive();
@@ -1192,6 +1230,11 @@ function updateRxHint() {
         return;
     }
     const autoRx = (modVal >= 0x7E0 && modVal <= 0x7E7) ? (modVal + 8) : (modVal + 0x6A);
+    if (autoRx > 0x7FF) {
+        el.innerText = "Otomatik RX (0x" + autoRx.toString(16).toUpperCase() + ") > 0x7FF — Manuel RX girin";
+        el.style.color = "#f87171";
+        return;
+    }
     el.innerText = "Beklenen Yanıt (RX): 0x" + autoRx.toString(16).toUpperCase() + " (Otomatik)";
     el.style.color = "#4ade80";
 }
@@ -1548,6 +1591,7 @@ static void flushLogQueue() {
 }
 
 void setup() {
+  g_core1HeartbeatMs = millis();
   rp2040.wdt_begin(WDT_TIMEOUT_MS);
 
   WiFi.mode(WIFI_AP);
@@ -1587,7 +1631,11 @@ void setup() {
 }
 
 void loop() {
-  rp2040.wdt_reset();
+  uint32_t core1Hb = g_core1HeartbeatMs;
+  uint32_t loopNow = millis();
+  if (g_isUpdating || ((int32_t)(loopNow - core1Hb) < (int32_t)CORE1_STALL_MS)) {
+    rp2040.wdt_reset();
+  }
 
   if (g_core0Sleeping) {
     delay(200);
