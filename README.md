@@ -41,6 +41,7 @@ Aktif olarak kullandığım en güncel sürüm **`vag_pico_custom_query/`**. Di�
   - `archive/nano-early/`: İlk Nano MFD (`v1.0`–`v3`), simülatör ve tarayıcı denemeleri.
   - `archive/nano-isotp/`: ISO-TP akış kontrolüne geçtiğim dönemdeki (`v5`, `v6`) doğrulayıcı ve tarayıcılar.
   - `archive/pico-early/`: İlk Pico 2 W denemeleri (SD kart loglamalı MFD ve ayrı web araçları).
+- **[CHANGELOG.md](CHANGELOG.md)**: Projenin gelişim aşamaları ve yapılan teknik düzeltmelerin özeti.
 
 ## Donanım Bağlantıları
 

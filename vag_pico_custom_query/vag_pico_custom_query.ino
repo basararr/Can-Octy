@@ -5,11 +5,17 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <ArduinoOTA.h>
+#include <LittleFS.h>
 #include <pico/mutex.h>
+#include <ctype.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(PICO_CYW43_SUPPORTED)
+#include <pico/cyw43_arch.h>
+#endif
 
 #include "secrets.h"
 
@@ -33,9 +39,11 @@ static constexpr uint32_t IDLE_PROBE_MS       = 5000UL;    // Gentle probe inter
 static constexpr uint32_t IDLE_TRAFFIC_WIN_MS = 2000UL;
 static constexpr uint8_t  BOOT_PROBE_MAX      = 2;         // Max probes on silent boot before passive wait
 static constexpr uint32_t SLEEP_AFTER_CAR_MS  = 180000UL;  // 3 min complete bus silence
-static constexpr uint32_t SLEEP_NO_CAR_MS     = 300000UL;  // 5 min boot silence (when 0 WS clients)
+static constexpr uint32_t SLEEP_NO_CAR_MS     = 300000UL;  // 5 min client & bus inactivity sleep
 static constexpr uint8_t  ACTIVE_FAIL_LIMIT   = 8;         // ~1 s of ECU silence -> Listen-Only
 static constexpr uint32_t WAKE_DEBOUNCE_MS    = 1000UL;
+static constexpr uint8_t  MCP_STAT_TXREQ_MASK = 0x54;      // TX0REQ (0x04) | TX1REQ (0x10) | TX2REQ (0x40)
+static constexpr uint8_t  UDS_MAX_PENDING_78  = 10;        // Max consecutive NRC 0x78 extensions per request
 
 // ==============================================================================
 // TYPES & SHARED MULTI-CORE STATE
@@ -136,11 +144,12 @@ static volatile bool    g_core1Paused    = false;
 static volatile bool    g_probeRequested = false;
 static volatile bool    g_sleepRequested = false;
 static volatile bool    g_core0Sleeping  = false;
-static volatile uint8_t  g_wsClientCount    = 0;
-static volatile uint32_t g_core1HeartbeatMs = 0;
+static volatile uint8_t  g_wsClientCount        = 0;
+static volatile uint32_t g_core1HeartbeatMs     = 0;
+static volatile uint32_t g_lastClientActivityMs = 0;
 
 // Fixed-capacity Ring Buffer for Log Messages (zero heap allocations)
-static constexpr size_t LOG_RING_CAP = 32;
+static constexpr size_t LOG_RING_CAP = 64;
 static constexpr size_t LOG_LINE_MAX = 160;
 static char   g_logRing[LOG_RING_CAP][LOG_LINE_MAX];
 static size_t g_logHead  = 0;
@@ -177,6 +186,7 @@ static bool     g_diagFilterActive   = false;
 static bool     g_normalModeDesired  = false;
 static bool     g_hwModeValid        = false;
 static bool     g_hwNormalMode       = false;
+static bool     g_everSawCanTraffic  = false;
 static uint32_t g_lastBusTrafficMs   = 0;
 static uint32_t g_lastIdleProbeMs    = 0;
 static uint32_t g_lastInitRetryMs    = 0;
@@ -217,6 +227,13 @@ static const char* getNrcText(uint8_t nrc) {
     case 0x7F: return "ServiceNotSupportedInActiveSession";
     default:   return "UnknownNRC";
   }
+}
+
+static uint8_t getBusState() {
+  mutex_enter_blocking(&dataMutex);
+  BusState st = g_busState;
+  mutex_exit(&dataMutex);
+  return (uint8_t)st;
 }
 
 static void setBusState(uint8_t st) {
@@ -266,12 +283,17 @@ static void handleCanErrors() {
   }
 }
 
+static bool hasPendingTx() {
+  return (can != nullptr) && ((can->getStatus() & MCP_STAT_TXREQ_MASK) != 0);
+}
+
 static void drainRxBuffer(uint8_t maxFrames) {
   if (!can) return;
   struct can_frame rx;
   uint8_t n = 0;
   while (n < maxFrames && can->readMessage(&rx) == MCP2515::ERROR_OK) {
     if (!(rx.can_id & CAN_RTR_FLAG)) {
+      g_everSawCanTraffic = true;
       g_lastBusTrafficMs = millis();
     }
     n++;
@@ -317,16 +339,28 @@ static bool setCanFiltersPromiscuous() {
 static void enterListenOnlyPassive() {
   if (!can) return;
   g_normalModeDesired = false;
-  if (!g_diagFilterActive && g_hwModeValid && !g_hwNormalMode) return;
-  if (g_diagFilterActive) {
-    setCanFiltersPromiscuous();
+  bool txStuck = hasPendingTx();
+  if (!txStuck && !g_diagFilterActive && g_hwModeValid && !g_hwNormalMode) return;
+
+  bool ok = false;
+  if (!txStuck) {
+    ok = (!g_diagFilterActive || setCanFiltersPromiscuous()) &&
+         (can->setListenOnlyMode() == MCP2515::ERROR_OK);
   }
-  if (can->setListenOnlyMode() == MCP2515::ERROR_OK) {
-    g_hwNormalMode = false;
-    g_hwModeValid = true;
-  } else {
+  if (!ok) {
+    // Pending un-ACKed TXREQ blocks CANCTRL mode changes on MCP2515 silicon;
+    // SPI hardware reset (0xC0) immediately aborts stuck TX and enters Listen-Only.
     g_hwModeValid = false;
+    g_diagFilterActive = false;
+    if (can->reset() == MCP2515::ERROR_OK &&
+        can->setBitrate(CAN_500KBPS, MCP_8MHZ) == MCP2515::ERROR_OK &&
+        setCanFiltersPromiscuous() &&
+        can->setListenOnlyMode() == MCP2515::ERROR_OK) {
+      ok = true;
+    }
   }
+  g_hwNormalMode = false;
+  g_hwModeValid = ok;
   handleCanErrors();
 }
 
@@ -390,18 +424,22 @@ static bool udsStartSession(uint16_t reqId, uint16_t resId, uint8_t sessionType)
   for (uint8_t i = 3; i < 8; i++) tx.data[i] = 0x55;
 
   if (can->sendMessage(&tx) != MCP2515::ERROR_OK) {
+    if (hasPendingTx()) initCanController();
     return false;
   }
 
   uint32_t startMs = millis();
   uint32_t timeoutMs = 120;
+  uint8_t  pendingCount = 0;
   struct can_frame rx;
   while (millis() - startMs < timeoutMs) {
     g_core1HeartbeatMs = millis();
     if (g_isUpdating) return false;
     if (can->readMessage(&rx) == MCP2515::ERROR_OK) {
+      if (rx.can_id & CAN_RTR_FLAG) continue;
+      g_everSawCanTraffic = true;
       g_lastBusTrafficMs = millis();
-      if ((rx.can_id & CAN_EFF_FLAG) || (rx.can_id & CAN_RTR_FLAG)) continue;
+      if (rx.can_id & CAN_EFF_FLAG) continue;
       if (rx.can_id != resId || rx.can_dlc < 3) continue;
       if ((rx.data[0] >> 4) == 0) {
         if (rx.data[1] == 0x50 && rx.data[2] == sessionType) {
@@ -409,6 +447,9 @@ static bool udsStartSession(uint16_t reqId, uint16_t resId, uint8_t sessionType)
         }
         if (rx.data[1] == 0x7F && rx.data[2] == 0x10) {
           if (rx.can_dlc >= 4 && rx.data[3] == 0x78) {
+            if (++pendingCount > UDS_MAX_PENDING_78) {
+              break;
+            }
             startMs = millis();
             timeoutMs = 1000;
             continue;
@@ -420,6 +461,9 @@ static bool udsStartSession(uint16_t reqId, uint16_t resId, uint8_t sessionType)
       handleCanErrors();
       delayMicroseconds(100);
     }
+  }
+  if (hasPendingTx()) {
+    initCanController();
   }
   return false;
 }
@@ -443,6 +487,7 @@ static bool udsReadDid(uint16_t reqId, uint16_t resId, uint16_t did, uint8_t* ou
 
   if (can->sendMessage(&tx) != MCP2515::ERROR_OK) {
     handleCanErrors();
+    if (hasPendingTx()) initCanController();
     *outStatus = UDS_ERR_TX;
     return false;
   }
@@ -453,6 +498,7 @@ static bool udsReadDid(uint16_t reqId, uint16_t resId, uint16_t did, uint8_t* ou
   size_t   expectDataLen = 0;
   size_t   rxDataCount = 0;
   uint8_t  expectedSN = 1;
+  uint8_t  pendingCount = 0;
   struct can_frame rx;
 
   while (millis() - startMs < timeoutMs) {
@@ -464,8 +510,10 @@ static bool udsReadDid(uint16_t reqId, uint16_t resId, uint16_t did, uint8_t* ou
       continue;
     }
 
+    if (rx.can_id & CAN_RTR_FLAG) continue;
+    g_everSawCanTraffic = true;
     g_lastBusTrafficMs = millis();
-    if ((rx.can_id & CAN_EFF_FLAG) || (rx.can_id & CAN_RTR_FLAG)) continue;
+    if (rx.can_id & CAN_EFF_FLAG) continue;
     if (rx.can_id != resId || rx.can_dlc < 2) continue;
 
     uint8_t pci = rx.data[0] >> 4;
@@ -478,7 +526,13 @@ static bool udsReadDid(uint16_t reqId, uint16_t resId, uint16_t did, uint8_t* ou
 
       if (rx.data[1] == 0x7F && rx.data[2] == 0x22) {
         uint8_t nrc = rx.data[3];
-        if (nrc == 0x78) { // ResponsePending: extend deadline
+        if (nrc == 0x78) { // ResponsePending: extend deadline up to UDS_MAX_PENDING_78
+          if (++pendingCount > UDS_MAX_PENDING_78) {
+            *outNrc = 0x78;
+            *outStatus = UDS_ERR_TIMEOUT;
+            if (hasPendingTx()) initCanController();
+            return false;
+          }
           startMs = millis();
           timeoutMs = 2000;
           continue;
@@ -503,7 +557,8 @@ static bool udsReadDid(uint16_t reqId, uint16_t resId, uint16_t did, uint8_t* ou
         return true;
       }
     } else if (pci == 1 && !isFirstFrame) {
-      if (rx.can_dlc < 6) continue;
+      // ISO 15765-2 classical CAN: First Frame must be a full 8-byte frame
+      if (rx.can_dlc < 8) continue;
       uint16_t totalIsoLen = ((uint16_t)(rx.data[0] & 0x0F) << 8) | rx.data[1];
       // ISO 15765-2: First Frame is only valid for payloads >= 8 bytes (1..7 bytes must be SF).
       if (totalIsoLen < 8) continue;
@@ -530,7 +585,12 @@ static bool udsReadDid(uint16_t reqId, uint16_t resId, uint16_t did, uint8_t* ou
         fc.data[1] = 0x00;
         fc.data[2] = 0x05;
         for (uint8_t k = 3; k < 8; k++) fc.data[k] = 0x55;
-        can->sendMessage(&fc);
+        if (can->sendMessage(&fc) != MCP2515::ERROR_OK) {
+          handleCanErrors();
+          *outStatus = UDS_ERR_TX;
+          if (hasPendingTx()) initCanController();
+          return false;
+        }
 
         expectedSN = 1;
         startMs = millis();
@@ -568,6 +628,9 @@ static bool udsReadDid(uint16_t reqId, uint16_t resId, uint16_t did, uint8_t* ou
     }
   }
 
+  if (hasPendingTx()) {
+    initCanController();
+  }
   return false;
 }
 
@@ -660,11 +723,12 @@ static void executeGatewayScan() {
     { 0x713, "ABS/ESP (03)"  },
     { 0x714, "Cluster (17)"  },
     { 0x710, "Gateway (19)"  },
-    { 0x765, "CentElec (09)" },
+    { 0x70E, "CentElec (09)" },
     { 0x715, "HVAC (08)"     },
     { 0x712, "PwrSteer (44)" },
     { 0x745, "Airbag (15)"   },
-    { 0x773, "InfoEnt (5F)"  }
+    { 0x773, "InfoEnt (5F)"  },
+    { 0x74A, "DrvDoor (42)"  }
   };
 
   for (size_t t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {
@@ -794,6 +858,7 @@ void setup1() {
   g_core1HeartbeatMs = millis();
   if (initCanController()) {
     g_lastBusTrafficMs = 0;
+    g_everSawCanTraffic = false;
     setBusState(BUS_IDLE);
     // Start passive until first ECU reply or active traffic is seen
     enterListenOnlyPassive();
@@ -816,7 +881,7 @@ void loop1() {
   }
   g_core1Paused = false;
 
-  BusState curBus = g_busState;
+  BusState curBus = (BusState)getBusState();
   uint32_t now = millis();
 
   if (curBus == BUS_INIT_FAIL) {
@@ -923,11 +988,11 @@ void loop1() {
       drainRxBuffer(8);
       now = millis();
 
-      bool hasRecentTraffic = (g_lastBusTrafficMs > 0) && (now - g_lastBusTrafficMs < IDLE_TRAFFIC_WIN_MS);
-      bool allowBootProbe   = (g_lastBusTrafficMs == 0) && (g_bootProbesDone < BOOT_PROBE_MAX);
-      bool probeDue         = (g_bootProbesDone == 0 && g_lastBusTrafficMs == 0)
+      bool hasRecentTraffic = g_everSawCanTraffic && ((uint32_t)(now - g_lastBusTrafficMs) < IDLE_TRAFFIC_WIN_MS);
+      bool allowBootProbe   = !g_everSawCanTraffic && (g_bootProbesDone < BOOT_PROBE_MAX);
+      bool probeDue         = (g_bootProbesDone == 0 && !g_everSawCanTraffic)
                               ? (now >= 500UL)
-                              : (now - g_lastIdleProbeMs >= IDLE_PROBE_MS);
+                              : ((uint32_t)(now - g_lastIdleProbeMs) >= IDLE_PROBE_MS);
       bool userProbe        = g_probeRequested;
 
       if (userProbe || ((hasRecentTraffic || allowBootProbe) && probeDue)) {
@@ -955,23 +1020,27 @@ void loop1() {
   }
 
   // Global deep-sleep check applies across ALL tabs (MFD / Custom / Scanner / Validator)
-  curBus = g_busState;
+  curBus = (BusState)getBusState();
+  uint32_t lastAct = g_lastClientActivityMs;
   now = millis();
-  if (curBus != BUS_ACTIVE) {
-    bool carSlept = (g_lastBusTrafficMs > 0) && (now - g_lastBusTrafficMs >= SLEEP_AFTER_CAR_MS);
-    bool benchIdleSlept = (g_lastBusTrafficMs == 0) && (now >= SLEEP_NO_CAR_MS) && (g_wsClientCount == 0);
-    if (carSlept || benchIdleSlept) {
+  if (!g_isUpdating) {
+    if (curBus != BUS_ACTIVE) {
+      bool carSlept = g_everSawCanTraffic && ((uint32_t)(now - g_lastBusTrafficMs) >= SLEEP_AFTER_CAR_MS);
+      bool benchIdleSlept = !g_everSawCanTraffic && (g_wsClientCount == 0) &&
+                            ((int32_t)(now - lastAct) >= (int32_t)SLEEP_NO_CAR_MS);
+      if (carSlept || benchIdleSlept) {
+        clearTelemetryValues();
+        enterListenOnlyPassive();
+        setBusState(BUS_SLEEP);
+        g_sleepRequested = true;
+      }
+    } else if (g_everSawCanTraffic && ((uint32_t)(now - g_lastBusTrafficMs) >= SLEEP_AFTER_CAR_MS)) {
+      // Safety fallback if user left a tool tab open while BUS_ACTIVE and car slept
       clearTelemetryValues();
       enterListenOnlyPassive();
       setBusState(BUS_SLEEP);
       g_sleepRequested = true;
     }
-  } else if ((g_lastBusTrafficMs > 0) && (now - g_lastBusTrafficMs >= SLEEP_AFTER_CAR_MS)) {
-    // Safety fallback if user left a tool tab open while BUS_ACTIVE and car slept
-    clearTelemetryValues();
-    enterListenOnlyPassive();
-    setBusState(BUS_SLEEP);
-    g_sleepRequested = true;
   }
 }
 
@@ -1046,7 +1115,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
     <div style="display:flex; gap:8px;">
         <button id="btn_edit" class="edit-btn" onclick="openSettings()">Düzenle</button>
-        <button class="edit-btn" onclick="toggleMenu()">☰ Menü</button>
+        <button id="btn_menu" class="edit-btn" onclick="toggleMenu(event)">☰ Menü</button>
     </div>
     <div id="nav_menu">
         <div class="nav-item" onclick="switchTab('mfd')">Dashboard</div>
@@ -1079,7 +1148,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             <button class="preset-btn" onclick="setMod('7E1')">TCU 7E1</button>
             <button class="preset-btn" onclick="setMod('710')">Gateway 710</button>
             <button class="preset-btn" onclick="setMod('714')">Kombi 714</button>
+            <button class="preset-btn" onclick="setMod('70E')">BCM 70E</button>
             <button class="preset-btn" onclick="setMod('713')">ABS 713</button>
+            <button class="preset-btn" onclick="setMod('74A')">Kapı 74A</button>
         </div>
         <div class="slot-select">
             <label>Modül TX Adresi (Hex, Örn: 7E0 veya 710)</label>
@@ -1121,11 +1192,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </div>
 
 <!-- SETTINGS MODAL -->
-<div id="modal">
-    <div class="modal-content">
+<div id="modal" onclick="onModalBackdrop(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
         <div class="modal-title">Ekranı Özelleştir</div>
         <div id="modal_slots"></div>
         <button class="save-btn" onclick="saveSettings()">Kaydet ve Çık</button>
+        <button class="action-btn btn-secondary" style="margin-top:8px; margin-bottom:0;" onclick="closeSettings()">İptal</button>
     </div>
 </div>
 
@@ -1185,10 +1257,18 @@ function tabToMode(tab) {
     return "0";
 }
 
-function toggleMenu() {
+function toggleMenu(ev) {
+    if (ev) ev.stopPropagation();
     const m = document.getElementById('nav_menu');
     m.style.display = (m.style.display === 'block') ? 'none' : 'block';
 }
+document.addEventListener('click', (e) => {
+    const m = document.getElementById('nav_menu');
+    const btn = document.getElementById('btn_menu');
+    if (m && m.style.display === 'block' && !m.contains(e.target) && e.target !== btn) {
+        m.style.display = 'none';
+    }
+});
 
 function switchTab(tab) {
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -1197,6 +1277,7 @@ function switchTab(tab) {
     document.getElementById('nav_menu').style.display = 'none';
     currentTab = tab;
     sendCmd("MODE:" + tabToMode(tab));
+    if (tab === 'mfd' && lastTelemetry) applyTelemetry(lastTelemetry);
 }
 
 function sendCmd(cmd) {
@@ -1209,27 +1290,33 @@ function setMod(hex) {
     updateRxHint();
 }
 
+function parseHexStrict(s) {
+    const clean = s.trim().replace(/^0x/i, "").toUpperCase();
+    if (!/^[0-9A-F]{1,4}$/.test(clean)) return { ok: false, val: NaN, hex: "" };
+    return { ok: true, val: parseInt(clean, 16), hex: clean };
+}
+
 function updateRxHint() {
-    const modVal = parseInt(document.getElementById('inp_mod').value.trim(), 16);
+    const mod = parseHexStrict(document.getElementById('inp_mod').value);
     const rxRaw = document.getElementById('inp_rx').value.trim();
     const el = document.getElementById('rx_hint');
-    if (isNaN(modVal) || modVal < 0x700 || modVal > 0x7EF) {
+    if (!mod.ok || mod.val < 0x700 || mod.val > 0x7EF) {
         el.innerText = "Geçersiz TX adresi (0x700..0x7EF arası girin)";
         el.style.color = "#f87171";
         return;
     }
     if (rxRaw) {
-        const rxVal = parseInt(rxRaw, 16);
-        if (isNaN(rxVal) || rxVal < 0x700 || rxVal > 0x7FF) {
+        const rx = parseHexStrict(rxRaw);
+        if (!rx.ok || rx.val < 0x700 || rx.val > 0x7FF) {
             el.innerText = "Geçersiz manuel RX adresi (0x700..0x7FF)";
             el.style.color = "#f87171";
             return;
         }
-        el.innerText = "Beklenen Yanıt (RX): 0x" + rxVal.toString(16).toUpperCase() + " (Manuel)";
+        el.innerText = "Beklenen Yanıt (RX): 0x" + rx.val.toString(16).toUpperCase() + " (Manuel)";
         el.style.color = "#fbbf24";
         return;
     }
-    const autoRx = (modVal >= 0x7E0 && modVal <= 0x7E7) ? (modVal + 8) : (modVal + 0x6A);
+    const autoRx = (mod.val >= 0x7E0 && mod.val <= 0x7E7) ? (mod.val + 8) : (mod.val + 0x6A);
     if (autoRx > 0x7FF) {
         el.innerText = "Otomatik RX (0x" + autoRx.toString(16).toUpperCase() + ") > 0x7FF — Manuel RX girin";
         el.style.color = "#f87171";
@@ -1240,11 +1327,32 @@ function updateRxHint() {
 }
 
 function sendCustom() {
-    const mod = document.getElementById('inp_mod').value.trim().toUpperCase();
-    const did = document.getElementById('inp_did').value.trim().toUpperCase();
-    const rx  = document.getElementById('inp_rx').value.trim().toUpperCase();
-    if (!mod || !did) return;
-    sendCmd(rx ? ("CMD:CST:" + mod + ":" + did + ":" + rx) : ("CMD:CST:" + mod + ":" + did));
+    const mod = parseHexStrict(document.getElementById('inp_mod').value);
+    const did = parseHexStrict(document.getElementById('inp_did').value);
+    const rxRaw = document.getElementById('inp_rx').value.trim();
+    if (!mod.ok || mod.val < 0x700 || mod.val > 0x7EF) {
+        appendTerm("term_custom", "[HATA] Gecersiz TX adresi (0x700..0x7EF).");
+        return;
+    }
+    if (!did.ok) {
+        appendTerm("term_custom", "[HATA] Gecersiz Hex DID formati.");
+        return;
+    }
+    if (rxRaw) {
+        const rx = parseHexStrict(rxRaw);
+        if (!rx.ok || rx.val < 0x700 || rx.val > 0x7FF) {
+            appendTerm("term_custom", "[HATA] Gecersiz manuel RX adresi (0x700..0x7FF).");
+            return;
+        }
+        sendCmd("CMD:CST:" + mod.hex + ":" + did.hex + ":" + rx.hex);
+        return;
+    }
+    const autoRx = (mod.val >= 0x7E0 && mod.val <= 0x7E7) ? (mod.val + 8) : (mod.val + 0x6A);
+    if (autoRx > 0x7FF) {
+        appendTerm("term_custom", "[HATA] Otomatik RX > 0x7FF; manuel RX girin.");
+        return;
+    }
+    sendCmd("CMD:CST:" + mod.hex + ":" + did.hex);
 }
 
 function clearTerm(id) {
@@ -1288,12 +1396,22 @@ function openSettings() {
     document.getElementById("modal").style.display = "block";
 }
 
+function closeSettings() {
+    document.getElementById("modal").style.display = "none";
+}
+
+function onModalBackdrop(ev) {
+    if (ev.target && ev.target.id === "modal") {
+        closeSettings();
+    }
+}
+
 function saveSettings() {
     for (let i = 0; i < 8; i++) {
         currentLayout[i] = document.getElementById(`sel_${i}`).value;
     }
     try { localStorage.setItem("mfd_layout", JSON.stringify(currentLayout)); } catch (e) {}
-    document.getElementById("modal").style.display = "none";
+    closeSettings();
     renderGrid();
     if (lastTelemetry) applyTelemetry(lastTelemetry);
 }
@@ -1315,7 +1433,7 @@ function applyTelemetry(j) {
         targetBoost = j.B;
         const prefix = targetBoost > 0.005 ? "+" : "";
         document.getElementById("val_boost").innerText = prefix + targetBoost.toFixed(2) + " BAR";
-    } else if (j.S !== undefined && j.S !== 0) {
+    } else {
         targetBoost = 0;
         document.getElementById("val_boost").innerText = "--.-- BAR";
     }
@@ -1339,6 +1457,10 @@ function applyTelemetry(j) {
                 }
             } else {
                 valEl.innerText = "--" + (info.unit ? " " + info.unit : "");
+                if (key === "DPF_PERC") {
+                    const bar = document.getElementById(`dpf_bar_${i}`);
+                    if (bar) bar.style.width = "0%";
+                }
             }
         }
     }
@@ -1419,17 +1541,28 @@ static uint32_t g_lastSentSeq      = 0;
 static bool     g_otaInitialized   = false;
 
 static void handleRoot() {
+  g_lastClientActivityMs = millis();
   server.send_P(200, PSTR("text/html; charset=utf-8"), INDEX_HTML, sizeof(INDEX_HTML) - 1);
 }
 
 static bool parseHexU16(const char* str, uint16_t* outVal) {
-  if (!str || *str == '\0') return false;
-  char* endPtr = nullptr;
-  unsigned long val = strtoul(str, &endPtr, 16);
-  if (endPtr == str || *endPtr != '\0' || val > 0xFFFFUL) {
-    return false;
+  if (!str || !outVal) return false;
+  if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+    str += 2;
   }
-  *outVal = (uint16_t)val;
+  size_t len = strlen(str);
+  if (len == 0 || len > 4) return false;
+  uint16_t acc = 0;
+  for (size_t i = 0; i < len; i++) {
+    unsigned char ch = (unsigned char)str[i];
+    if (!isxdigit(ch)) return false;
+    uint8_t nibble = 0;
+    if (ch >= '0' && ch <= '9') nibble = (uint8_t)(ch - '0');
+    else if (ch >= 'a' && ch <= 'f') nibble = (uint8_t)(10 + (ch - 'a'));
+    else nibble = (uint8_t)(10 + (ch - 'A'));
+    acc = (uint16_t)((acc << 4) | nibble);
+  }
+  *outVal = acc;
   return true;
 }
 
@@ -1437,6 +1570,7 @@ static void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t 
   (void)num;
   if (type == WStype_CONNECTED || type == WStype_DISCONNECTED) {
     g_wsClientCount = (uint8_t)webSocket.connectedClients(false);
+    g_lastClientActivityMs = millis();
     return;
   }
   if (type != WStype_TEXT || length == 0 || payload == nullptr) return;
@@ -1445,6 +1579,7 @@ static void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t 
   size_t copyLen = (length < sizeof(cmdBuf) - 1) ? length : (sizeof(cmdBuf) - 1);
   memcpy(cmdBuf, payload, copyLen);
   cmdBuf[copyLen] = '\0';
+  g_lastClientActivityMs = millis();
 
   if (strncmp(cmdBuf, "MODE:", 5) == 0) {
     int m = atoi(cmdBuf + 5);
@@ -1534,22 +1669,27 @@ static void broadcastTelemetryIfDue(uint32_t now) {
   if (elapsedHb) g_lastWsHeartbeat = now;
   g_lastSentSeq = seq;
 
-  static char jsonBuf[1024];
+  // Reserve WEBSOCKETS_MAX_HEADER_SIZE prefix bytes so broadcastTXT(..., headerToPayload=true)
+  // frames the packet in place with zero heap malloc/free inside WebSocketsServer.
+  static char wsFrameBuf[WEBSOCKETS_MAX_HEADER_SIZE + 1024];
+  char* jsonBuf = wsFrameBuf + WEBSOCKETS_MAX_HEADER_SIZE;
   int pos = 0;
-  int rem = (int)sizeof(jsonBuf);
+  int rem = 1024;
 
   int n = snprintf(jsonBuf + pos, rem, "{\"S\":%u", (unsigned)bState);
   if (n > 0 && n < rem) { pos += n; rem -= n; }
 
-  if (upd[IDX_BOOST]) {
+  if (upd[IDX_BOOST] && isfinite(vals[IDX_BOOST])) {
     n = snprintf(jsonBuf + pos, rem, ",\"B\":%.2f", vals[IDX_BOOST]);
     if (n > 0 && n < rem) { pos += n; rem -= n; }
   }
 
   if (upd[IDX_SOOT_CALC] && upd[IDX_DPF_LIMIT] && vals[IDX_DPF_LIMIT] > 0.0f) {
     float dpfPct = (vals[IDX_SOOT_CALC] / vals[IDX_DPF_LIMIT]) * 100.0f;
-    n = snprintf(jsonBuf + pos, rem, ",\"DPF\":%.1f", dpfPct);
-    if (n > 0 && n < rem) { pos += n; rem -= n; }
+    if (isfinite(dpfPct)) {
+      n = snprintf(jsonBuf + pos, rem, ",\"DPF\":%.1f", dpfPct);
+      if (n > 0 && n < rem) { pos += n; rem -= n; }
+    }
   }
 
   n = snprintf(jsonBuf + pos, rem, ",\"D\":{");
@@ -1557,10 +1697,10 @@ static void broadcastTelemetryIfDue(uint32_t now) {
 
   bool first = true;
   for (size_t i = 0; i < NUM_DIDS; i++) {
-    if (!upd[i]) continue;
+    if (!upd[i] || !isfinite(vals[i])) continue;
     n = snprintf(jsonBuf + pos, rem, "%s\"%s\":%.2f",
                  first ? "" : ",", DID_DEFS[i].hexKey, vals[i]);
-    if (n <= 0 || n >= rem) break;
+    if (n <= 0 || (rem - n) <= 2) break;
     pos += n;
     rem -= n;
     first = false;
@@ -1569,7 +1709,9 @@ static void broadcastTelemetryIfDue(uint32_t now) {
   n = snprintf(jsonBuf + pos, rem, "}}");
   if (n > 0 && n < rem) { pos += n; }
 
-  webSocket.broadcastTXT(jsonBuf, (size_t)pos);
+  if (pos > 0) {
+    webSocket.broadcastTXT(wsFrameBuf, (size_t)pos, true);
+  }
 }
 
 static void flushLogQueue() {
@@ -1585,13 +1727,19 @@ static void flushLogQueue() {
   }
   mutex_exit(&logMutex);
 
+  char wsLogBuf[WEBSOCKETS_MAX_HEADER_SIZE + LOG_LINE_MAX];
   for (size_t i = 0; i < count; i++) {
-    webSocket.broadcastTXT(batch[i]);
+    size_t len = strlen(batch[i]);
+    if (len == 0) continue;
+    memcpy(wsLogBuf + WEBSOCKETS_MAX_HEADER_SIZE, batch[i], len);
+    webSocket.broadcastTXT(wsLogBuf, len, true);
   }
 }
 
 void setup() {
-  g_core1HeartbeatMs = millis();
+  uint32_t bootNow = millis();
+  g_core1HeartbeatMs = bootNow;
+  g_lastClientActivityMs = bootNow;
   rp2040.wdt_begin(WDT_TIMEOUT_MS);
 
   WiFi.mode(WIFI_AP);
@@ -1603,9 +1751,13 @@ void setup() {
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
 
+  // Pre-mount LittleFS so ArduinoOTA never delays before calling onStart()
+  LittleFS.begin();
+
   ArduinoOTA.setHostname("vag-mfd-pico");
   ArduinoOTA.onStart([]() {
     g_isUpdating = true;
+    g_lastClientActivityMs = millis();
     uint32_t waitStart = millis();
     while (!g_core1Paused && (millis() - waitStart < 250UL)) {
       rp2040.wdt_reset();
@@ -1615,15 +1767,18 @@ void setup() {
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     (void)progress;
     (void)total;
+    g_lastClientActivityMs = millis();
     rp2040.wdt_reset();
   });
   ArduinoOTA.onEnd([]() {
     rp2040.wdt_reset();
+    g_lastClientActivityMs = millis();
     g_isUpdating = false;
   });
   ArduinoOTA.onError([](ota_error_t err) {
     (void)err;
     rp2040.wdt_reset();
+    g_lastClientActivityMs = millis();
     g_isUpdating = false;
   });
   ArduinoOTA.begin();
@@ -1650,8 +1805,12 @@ void loop() {
     }
     webSocket.close();
     server.close();
-    WiFi.softAPdisconnect(true);
+    LittleFS.end();
+    WiFi.disconnectAP();
     WiFi.mode(WIFI_OFF);
+#if defined(PICO_CYW43_SUPPORTED)
+    cyw43_arch_deinit();
+#endif
     return;
   }
 
@@ -1660,6 +1819,9 @@ void loop() {
   webSocket.loop();
 
   g_wsClientCount = (uint8_t)webSocket.connectedClients(false);
+  if (g_wsClientCount > 0) {
+    g_lastClientActivityMs = loopNow;
+  }
 
   flushLogQueue();
   broadcastTelemetryIfDue(millis());
